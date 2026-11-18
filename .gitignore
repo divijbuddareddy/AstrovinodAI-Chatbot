@@ -9,3 +9,4 @@ google_sheet_script/
 *.db-journal
 exported_data/
 .dist/
+render_env.txt

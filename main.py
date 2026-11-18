@@ -7,9 +7,9 @@ import json
 import logging
 
 from fastapi import BackgroundTasks, FastAPI, Request, Response
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
-from app import bot, config, whatsapp
+from app import bot, config, legal, whatsapp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 app = FastAPI(title="AstroVinod WhatsApp Bot")
@@ -24,6 +24,12 @@ def _connect_sheets() -> None:
 @app.api_route("/health", methods=["GET", "HEAD"])  # Render health check + uptime pinger (keeps free tier awake)
 def health() -> dict:
     return {"ok": True}
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+@app.get("/data-deletion", response_class=HTMLResponse)
+def privacy() -> str:
+    return legal.PRIVACY_HTML
 
 
 @app.get("/webhook")
