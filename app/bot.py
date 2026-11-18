@@ -4,7 +4,8 @@ import logging
 import threading
 from collections import defaultdict
 
-from datetime import datetime
+import re
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from . import ai, astrology, intents, vedic, whatsapp
@@ -123,76 +124,138 @@ def now_context(customer: dict, chart: dict) -> dict:
     }
 
 
-_FIELD_PROMPTS = {
-    "full_name": "*Full Name:*",
-    "dob": "*Date of Birth:* (DD/MM/YYYY)",
-    "birth_time": "*Time of Birth:* HH:MM AM/PM",
-    "birth_place": "*Place of Birth:* (City, State, Country)",
-}
+def _first(customer: dict) -> str:
+    return (customer.get("full_name") or "").split(" ")[0]
+
+
+def _set_place(customer: dict, place: str) -> bool:
+    """Validate a birthplace on the map. Saves it with coordinates; False if not found."""
+    try:
+        found = astrology.geocode(place)
+    except astrology.BirthplaceNotFound:
+        return False
+    customer.update(birth_place=place.strip(), **found)
+    return True
 
 
 def onboard(customer: dict, msg: dict) -> None:
-    """Welcome flow: read birth details from the client's message or uploaded Kundali, ask only for what's missing,
-    then build the chart and send the master-prompt analysis."""
+    """Collect birth details one question at a time: name -> DOB -> time -> place.
+    Each answer is read with a fast parser first; anything unusual (several details in one message,
+    "14th May 1992", "evening 6:30", a Kundali PDF) is read by Claude. Then the next missing detail is asked."""
     phone = customer["phone_number"]
-    media, mime = None, ""
-    if msg["media_id"]:
+    current = sm.next_question(customer)
+    text = msg["text"].strip()
+    ask_ampm = ""
+    place_error = False
+
+    if msg["media_id"]:  # uploaded Kundali PDF / photo
+        media, mime = None, ""
         try:
             media, mime = whatsapp.download_media(msg["media_id"])
             mime = (msg["mime_type"] or mime or "").split(";")[0].strip()
         except Exception:
             log.exception("Media download failed for %s", msg["media_id"])
         if mime not in ("application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif"):
-            reply(phone, "🙏 Please upload your Kundali as a *PDF* (or a clear photo), or simply type your birth details.")
+            reply(phone, "🙏 I can read a Kundali as a *PDF* or a clear photo. Or simply answer:\n\n" + sm.QUESTIONS[current or "full_name"])
             return
         reply(phone, "📎 Thank you! Reading your Kundali now…")
+        caption = "" if text.startswith("Please analyse") else text
+        details = ai.extract_birth_details(customer, caption, media, mime, sm.QUESTIONS.get(current, ""))
+        _merge(customer, details)
+        if details.is_birth_chart and details.chart_notes:
+            customer["kundli_pdf_notes"] = details.chart_notes[:20000]
+        elif not details.is_birth_chart:
+            reply(phone, "🙏 I couldn't find birth details in that file, so let's do it step by step.")
+    else:
+        handled = False
+        if current == "full_name":
+            name = sm.parse_name(text)
+            if name:
+                customer["full_name"], handled = name, True
+        elif current == "dob":
+            dob = sm.parse_dob(text)
+            if dob:
+                customer["dob"], handled = dob, True
+        elif current == "birth_time":
+            t, ambiguous = sm.parse_time(text)
+            if t and not ambiguous:
+                customer["birth_time"], handled = t, True
+            elif t and ambiguous:
+                ask_ampm, handled = t, True
+        elif current == "birth_place":
+            if 2 <= len(text) <= 120 and not re.search(r"\d{3,}", text):
+                handled = True
+                if not _set_place(customer, text):
+                    place_error = True
 
-    text = "" if media and msg["text"].startswith("Please analyse") else msg["text"]
-    last_bot = next((r["message"] for r in reversed(store().recent_history(phone, limit=6))
-                     if r.get("role") == "assistant"), "")
-    details = ai.extract_birth_details(customer, text, media, mime, last_bot)
+        if not handled:  # unusual format or several details at once -> let Claude read it
+            last_bot = next((r["message"] for r in reversed(store().recent_history(phone, limit=6))
+                             if r.get("role") == "assistant"), "")
+            details = ai.extract_birth_details(customer, text, last_bot_message=last_bot)
+            _merge(customer, details)
+            if details.time_is_ambiguous and details.time_of_birth and not customer.get("birth_time"):
+                ask_ampm = details.time_of_birth
 
-    if details.full_name:
-        customer["full_name"] = details.full_name.strip()
-    if sm.valid_dob(details.date_of_birth):
-        customer["dob"] = details.date_of_birth
-    if sm.valid_time(details.time_of_birth) and not details.time_is_ambiguous:
-        customer["birth_time"] = details.time_of_birth
-    if details.place_of_birth and details.place_of_birth != customer.get("birth_place"):
-        customer.update(birth_place=details.place_of_birth.strip(), latitude="", longitude="", resolved_place="")
-    if details.is_birth_chart and details.chart_notes:
-        customer["kundli_pdf_notes"] = details.chart_notes[:20000]
+    # A place read by Claude (from text or a Kundali) still needs checking on the map.
+    if customer.get("birth_place") and not customer.get("latitude") and not place_error:
+        if not _set_place(customer, customer["birth_place"]):
+            customer["birth_place"] = ""
+            place_error = True
 
-    missing = [k for k in sm.PROFILE_FIELDS if not customer.get(k)]
-    if missing:
+    nxt = sm.next_question(customer)
+    if nxt:
         customer["conversation_state"] = "onboarding"
         store().upsert_customer(customer)
-        first = customer.get("full_name", "").split(" ")[0]
-        lines = []
-        if details.time_is_ambiguous and "birth_time" in missing:
-            lines.append(f"Was your birth time *{details.time_of_birth}* in the morning (AM) or evening (PM)? "
-                         "Please reply like 06:35 AM.")
-            missing.remove("birth_time")
-        if missing:
-            got = "Thank you" + (f", {first} ji" if first else "") + "! 🙏"
-            if media and not details.is_birth_chart:
-                got = "🙏 I couldn't find birth details in that file."
-            elif media:
-                got = "🙏 Thank you! I've read your Kundali, but I still need a few details."
-            lines.insert(0, got + "\n\nPlease share:\n" + "\n".join(_FIELD_PROMPTS[k] for k in missing))
-        reply(phone, "\n\n".join(lines))
+        if ask_ampm:
+            reply(phone, f"Is your birth time *{ask_ampm}* in the morning or evening?\nPlease reply like *{ask_ampm} AM* or *{ask_ampm} PM*.")
+        elif place_error:
+            reply(phone, "🙏 I couldn't find that place on the map. Please send it as *City, State, Country*\n_Example: Mysuru, Karnataka, India_")
+        elif nxt == current:  # the answer couldn't be understood -> ask the same question again
+            hints = {"full_name": "Please type your full name.",
+                     "dob": "Please send your date of birth like *14/05/1992*.",
+                     "birth_time": "Please send your time of birth like *06:35 AM* or *06:35 PM*.",
+                     "birth_place": "Please send your place of birth like *Mysuru, Karnataka, India*."}
+            reply(phone, "🙏 " + hints[nxt])
+        else:
+            thanks = f"Thank you, {_first(customer)} ji! 🙏\n\n" if current == "full_name" and _first(customer) else "Thank you! 🙏\n\n"
+            reply(phone, thanks + sm.QUESTIONS[nxt])
         return
 
     customer["consent"] = "yes"
     customer["conversation_state"] = "ready"
     store().upsert_customer(customer)
     reply(phone, (
-        f"🙏 Thank you, {customer['full_name'].split(' ')[0]} ji! Your birth profile:\n\n"
-        f"• *Name:* {customer['full_name']}\n• *Date of Birth:* {customer['dob']}\n"
-        f"• *Time of Birth:* {customer['birth_time']}\n• *Place of Birth:* {customer['birth_place']}\n\n"
-        "🔭 Generating your Vedic birth chart and preparing your birth profile. This takes 2-3 minutes…\n"
+        f"🙏 Thank you, {_first(customer)} ji! Your birth profile:\n\n"
+        f"• *Name:* {customer['full_name']}\n• *Date of Birth:* {_fmt_dob(customer['dob'])}\n"
+        f"• *Time of Birth:* {_fmt_time(customer['birth_time'])}\n• *Place of Birth:* {customer['birth_place']}\n\n"
+        "🔭 Generating your Vedic birth chart and personalised horoscope. This takes 2-3 minutes…\n"
         "_(Reply RESET anytime to correct your details.)_"))
     generate_horoscope(customer)
+
+
+def _merge(customer: dict, details) -> None:
+    if details.full_name and not customer.get("full_name"):
+        customer["full_name"] = details.full_name.strip()
+    if sm.valid_dob(details.date_of_birth) and not customer.get("dob"):
+        customer["dob"] = details.date_of_birth
+    if sm.valid_time(details.time_of_birth) and not details.time_is_ambiguous and not customer.get("birth_time"):
+        customer["birth_time"] = details.time_of_birth
+    if details.place_of_birth and not customer.get("birth_place"):
+        customer.update(birth_place=details.place_of_birth.strip(), latitude="", longitude="", resolved_place="")
+
+
+def _fmt_dob(iso: str) -> str:
+    try:
+        return date.fromisoformat(iso).strftime("%d/%m/%Y")
+    except ValueError:
+        return iso
+
+
+def _fmt_time(hhmm: str) -> str:
+    try:
+        return datetime.strptime(hhmm, "%H:%M").strftime("%I:%M %p")
+    except ValueError:
+        return hhmm
 
 
 def generate_horoscope(customer: dict) -> None:
@@ -202,7 +265,7 @@ def generate_horoscope(customer: dict) -> None:
     except astrology.BirthplaceNotFound:
         customer.update(conversation_state="onboarding", birth_place="", latitude="", longitude="", resolved_place="")
         store().upsert_customer(customer)
-        reply(phone, "I couldn't find that birthplace on the map. Please send it again as *City, Country* (e.g. Mysuru, India).")
+        reply(phone, "🙏 I couldn't find your birthplace on the map. " + sm.QUESTIONS["birth_place"])
         return
     report = ai.horoscope_report(customer, chart, now_context(customer, chart))
     reply(phone, report)

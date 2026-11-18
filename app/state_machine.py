@@ -26,32 +26,19 @@ _Your Personal Astrologer._
 
 I'm happy to assist you with your astrological questions and provide personalised insights based on Vedic Astrology.
 
-🌟 Let's begin by setting up your birth profile.
-
-*Step 1:* Do you have a copy of your birth chart (Kundali)?
-
-📎 *If YES:* Please upload your birth chart in PDF format. I will use it as the reference for your astrological analysis.
-
-📝 *If NO:* No problem! I can generate your birth chart using your birth details.
-Please share the following information:
-*Full Name:*
-*Date of Birth:* (DD/MM/YYYY)
-*Time of Birth:* HH:MM AM/PM
-*Place of Birth:* (City, State, Country)
+🌟 Let's begin by setting up your birth profile. I'll ask you 4 quick details: your name, date of birth, time of birth and place of birth.
 
 🔭 Once I receive your details, I will generate your Vedic birth chart using precise astrological calculations and prepare your birth profile.
 
-Let's begin your journey of cosmic insights! ✨"""
+👉 *May I know your Full Name?*"""
 
-ASK_PDF = "📎 Wonderful! Please upload your birth chart (Kundali) here in *PDF format*. I will use it as the reference for your astrological analysis."
-
-ASK_DETAILS = """📝 No problem! I can generate your birth chart using your birth details.
-Please share the following information:
-
-*Full Name:*
-*Date of Birth:* (DD/MM/YYYY)
-*Time of Birth:* HH:MM AM/PM
-*Place of Birth:* (City, State, Country)"""
+# One question at a time, in this order.
+QUESTIONS = {
+    "full_name": "👉 *May I know your Full Name?*",
+    "dob": "📅 Please share your *Date of Birth* (DD/MM/YYYY)\n_Example: 14/05/1992_",
+    "birth_time": "⏰ What is your *Time of Birth*? (HH:MM AM/PM)\n_Example: 06:35 AM_",
+    "birth_place": "📍 What is your *Place of Birth*? (City, State, Country)\n_Example: Mysuru, Karnataka, India_",
+}
 
 PROFILE_FIELDS = ("full_name", "dob", "birth_time", "birth_place")
 CHART_FIELDS = ("resolved_place", "latitude", "longitude", "timezone", "chart_summary", "kundli_pdf_notes")
@@ -80,8 +67,8 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
 
     if not existing:
         c["conversation_state"] = "onboarding"
-        # First message already is a Kundali or contains birth details -> process it straight away.
-        if is_media or re.search(r"\d{1,2}\s*[/.-]\s*\d{1,2}\s*[/.-]\s*\d{4}", msg):
+        # A Kundali file as the very first message -> read it straight away.
+        if is_media:
             return StepResult(c, "", action="onboard")
         return StepResult(c, WELCOME)
 
@@ -91,8 +78,7 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
         for k in PROFILE_FIELDS + CHART_FIELDS + ("consent",):
             c[k] = ""
         c["conversation_state"] = "onboarding"
-        return StepResult(c, "Sure, let's set up your birth profile again. 🙏\n\n" + ASK_DETAILS +
-                          "\n\nOr upload your Kundali PDF if you have one.")
+        return StepResult(c, "Sure, let's set up your birth profile again. 🙏\n\n" + QUESTIONS["full_name"])
 
     if state in LEGACY_ONBOARDING:
         state = c["conversation_state"] = "onboarding"
@@ -101,11 +87,8 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
         if is_media:
             return StepResult(c, "", action="onboard")
         if not msg or GREETING.match(msg):
-            return StepResult(c, WELCOME)
-        if YES.match(msg):
-            return StepResult(c, ASK_PDF)
-        if NO.match(msg):
-            return StepResult(c, ASK_DETAILS)
+            nxt = next_question(c)
+            return StepResult(c, WELCOME if nxt == "full_name" else "🙏 Let's continue.\n\n" + QUESTIONS[nxt])
         return StepResult(c, "", action="onboard")
 
     if state == "confirm_horoscope":  # legacy n8n state
@@ -146,3 +129,56 @@ def valid_dob(iso: str) -> bool:
 def valid_time(hhmm: str) -> bool:
     m = re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", hhmm or "")
     return bool(m)
+
+
+def next_question(c: dict) -> str | None:
+    """The first profile field still missing, in the order name -> DOB -> time -> place."""
+    return next((k for k in PROFILE_FIELDS if not c.get(k)), None)
+
+
+_NAME_PREFIX = re.compile(r"^(hi|hello|namaste)?[,! ]*(my name is|my name's|i am|i'm|this is|name\s*[:\-]?)\s*", re.I)
+_NOT_A_NAME = re.compile(r"^(yes|no|ok|okay|hi|hello|hey|namaste|thanks|thank you|sure|hmm+|na|nahi)[.! ]*$", re.I)
+
+
+def parse_name(text: str) -> str | None:
+    name = _NAME_PREFIX.sub("", text.strip()).strip(" .,!")
+    if not name or _NOT_A_NAME.match(name) or re.search(r"\d", name) or not 2 <= len(name) <= 60 or len(name.split()) > 6:
+        return None
+    return name.title() if name.islower() or name.isupper() else name
+
+
+def parse_dob(text: str) -> str | None:
+    m = re.match(r"^\s*(\d{1,2})\s*[/.\- ]\s*(\d{1,2})\s*[/.\- ]\s*(\d{4})\s*$", text)
+    if not m:
+        return None
+    d, mo, y = (int(x) for x in m.groups())
+    try:
+        iso = date(y, mo, d).isoformat()
+    except ValueError:
+        return None
+    return iso if valid_dob(iso) else None
+
+
+def parse_time(text: str) -> tuple[str | None, bool]:
+    """Returns (HH:MM 24h or None, needs_am_pm)."""
+    t = text.strip().lower().replace(".", ":").replace(" ", "")
+    t = t.replace("a:m:", "am").replace("p:m:", "pm").replace("a:m", "am").replace("p:m", "pm")
+    m = re.match(r"^(\d{1,2})(?::(\d{2}))?(am|pm)$", t)
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2) or 0)
+        if not 1 <= h <= 12 or mi > 59:
+            return None, False
+        if m.group(3) == "pm" and h != 12:
+            h += 12
+        if m.group(3) == "am" and h == 12:
+            h = 0
+        return f"{h:02d}:{mi:02d}", False
+    m = re.match(r"^(\d{1,2}):(\d{2})(hrs|hours|h)?$", t)
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2))
+        if h > 23 or mi > 59:
+            return None, False
+        if 1 <= h <= 12 and not m.group(3):
+            return f"{h:02d}:{mi:02d}", True  # could be AM or PM
+        return f"{h:02d}:{mi:02d}", False
+    return None, False
