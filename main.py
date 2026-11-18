@@ -26,8 +26,8 @@ def health() -> dict:
     return {"ok": True}
 
 
-@app.get("/privacy", response_class=HTMLResponse)
-@app.get("/data-deletion", response_class=HTMLResponse)
+@app.api_route("/privacy", methods=["GET", "HEAD"], response_class=HTMLResponse)
+@app.api_route("/data-deletion", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def privacy() -> str:
     return legal.PRIVACY_HTML
 
