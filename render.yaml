@@ -1,0 +1,38 @@
+# Render Blueprint - Dashboard > New > Blueprint > pick this repo.
+# Secrets marked sync:false are entered in the Render dashboard (never committed).
+services:
+  - type: web
+    name: astrovinod-bot
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt && python -c "import app.vedic"  # also downloads the JPL ephemeris
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.6
+      - key: GRAPH_API_VERSION
+        value: v22.0
+      - key: CLAUDE_MODEL
+        value: claude-opus-5-5
+      - key: PROKERALA_AYANAMSA
+        value: "1"
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        value: "1366570576545721"
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PROKERALA_CLIENT_ID
+        sync: false
+      - key: PROKERALA_CLIENT_SECRET
+        sync: false
+      - key: NOMINATIM_USER_AGENT
+        sync: false
+      - key: DATABASE_URL   # Neon PostgreSQL connection string
+        sync: false
