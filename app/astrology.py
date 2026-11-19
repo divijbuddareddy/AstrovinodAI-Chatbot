@@ -21,19 +21,83 @@ class BirthplaceNotFound(Exception):
     pass
 
 
-def geocode(place: str) -> dict:
+class GeocodingUnavailable(Exception):
+    """Every map service failed (network error, blocked or rate-limited) - not the user's fault."""
+
+
+def _nominatim(place: str) -> dict | None:
     resp = requests.get(
         "https://nominatim.openstreetmap.org/search",
         params={"q": place, "format": "jsonv2", "limit": 1},
         headers={"User-Agent": config.NOMINATIM_USER_AGENT},
-        timeout=20,
+        timeout=15,
     )
     resp.raise_for_status()
     results = resp.json()
     if not results:
-        raise BirthplaceNotFound(place)
+        return None
     top = results[0]
     return {"latitude": float(top["lat"]), "longitude": float(top["lon"]), "resolved_place": top.get("display_name", place)}
+
+
+def _photon(place: str) -> dict | None:
+    resp = requests.get(
+        "https://photon.komoot.io/api/",
+        params={"q": place, "limit": 1, "lang": "en"},
+        headers={"User-Agent": config.NOMINATIM_USER_AGENT},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    features = resp.json().get("features") or []
+    if not features:
+        return None
+    p, (lon, lat) = features[0]["properties"], features[0]["geometry"]["coordinates"]
+    name = ", ".join(dict.fromkeys(x for x in (p.get("name"), p.get("city"), p.get("state"), p.get("country")) if x))
+    return {"latitude": float(lat), "longitude": float(lon), "resolved_place": name or place}
+
+
+def _open_meteo(place: str) -> dict | None:
+    parts = [x.strip() for x in place.split(",") if x.strip()]
+    if not parts:
+        return None
+    resp = requests.get(
+        "https://geocoding-api.open-meteo.com/v1/search",
+        params={"name": parts[0], "count": 10, "language": "en"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    results = resp.json().get("results") or []
+    if not results:
+        return None
+    hints = {x.lower() for x in parts[1:]}
+
+    def score(r: dict) -> int:  # prefer the state/country the user typed, then India
+        s = 2 * sum(1 for k in ("admin1", "country") if str(r.get(k, "")).lower() in hints)
+        return s + (1 if r.get("country_code") == "IN" else 0)
+
+    top = max(results, key=score)
+    if hints and score(top) < 2:  # user named a state/country and no result is there -> wrong town
+        return None
+    name = ", ".join(x for x in (top.get("name"), top.get("admin1"), top.get("country")) if x)
+    return {"latitude": float(top["latitude"]), "longitude": float(top["longitude"]), "resolved_place": name}
+
+
+def geocode(place: str) -> dict:
+    """Find a birthplace on the map, falling back to other free services if one fails."""
+    place = place.strip()
+    errors = 0
+    for service in (_nominatim, _photon, _open_meteo):
+        try:
+            found = service(place)
+        except Exception as exc:  # blocked, rate-limited, timeout, bad JSON...
+            errors += 1
+            log.warning("Geocoder %s failed for %r: %s", service.__name__, place, str(exc)[:200])
+            continue
+        if found:
+            return found
+    if errors == 3:
+        raise GeocodingUnavailable(place)
+    raise BirthplaceNotFound(place)
 
 
 def birth_datetime(dob: str, birth_time: str, lat: float, lon: float) -> tuple[str, str]:

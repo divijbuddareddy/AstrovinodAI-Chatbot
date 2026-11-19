@@ -132,7 +132,7 @@ def _set_place(customer: dict, place: str) -> bool:
     """Validate a birthplace on the map. Saves it with coordinates; False if not found."""
     try:
         found = astrology.geocode(place)
-    except astrology.BirthplaceNotFound:
+    except (astrology.BirthplaceNotFound, astrology.GeocodingUnavailable):
         return False
     customer.update(birth_place=place.strip(), **found)
     return True
