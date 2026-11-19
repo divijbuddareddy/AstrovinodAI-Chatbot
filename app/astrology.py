@@ -1,4 +1,5 @@
 """Birthplace geocoding, timezone resolution and Prokerala kundli lookup."""
+import functools
 import json
 import logging
 import threading
@@ -83,8 +84,13 @@ def _open_meteo(place: str) -> dict | None:
 
 
 def geocode(place: str) -> dict:
-    """Find a birthplace on the map, falling back to other free services if one fails."""
-    place = place.strip()
+    """Find a birthplace on the map, falling back to other free services if one fails.
+    Results are cached, so the 1,000th "Bengaluru" never touches the map services."""
+    return dict(_geocode_cached(" ".join(place.lower().replace(",", ", ").split())))
+
+
+@functools.lru_cache(maxsize=20000)
+def _geocode_cached(place: str) -> dict:  # exceptions are not cached, so failures get retried next time
     errors = 0
     for service in (_nominatim, _photon, _open_meteo):
         try:

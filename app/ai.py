@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 
 from . import config
 
-client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+# Retries (with backoff) cover rate limits (429), "overloaded" (529), 5xx and network blips under heavy load.
+client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=6, timeout=600)
 
 # Server-side refusal fallback is supported on these models; skip it for others.
 _FALLBACK_MODELS = {"claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2", "claude-fable-5-1", "claude-opus-5"}

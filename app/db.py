@@ -71,7 +71,9 @@ class DbStore:
         url = _engine_url()
         # Neon's "-pooler" endpoint is PgBouncer in transaction mode: disable server-side prepared statements.
         connect_args = {"prepare_threshold": None} if url.startswith("postgresql") else {}
-        self.engine = create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args=connect_args)
+        # Enough connections for many conversations at once (Neon's pooler endpoint accepts thousands).
+        pool = {"pool_size": 20, "max_overflow": 30, "pool_timeout": 60} if url.startswith("postgresql") else {}
+        self.engine = create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args=connect_args, **pool)
         metadata.create_all(self.engine)
         self._lock = threading.Lock()
         log.info("Database ready (%s)", self.engine.url.get_backend_name())

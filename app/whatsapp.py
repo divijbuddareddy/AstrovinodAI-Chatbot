@@ -1,6 +1,8 @@
 """WhatsApp Cloud API helpers: parse webhooks, send text, download media."""
 import hashlib
 import hmac
+import random
+import time
 
 import requests
 
@@ -84,9 +86,25 @@ def split_message(text: str, limit: int = MAX_WA_CHARS) -> list[str]:
     return chunks
 
 
+def _with_retries(do, attempts: int = 5):
+    """Call do() -> Response; retry rate limits (429), Meta 5xx and network errors with backoff."""
+    for i in range(attempts):
+        try:
+            resp = do()
+        except requests.RequestException:
+            if i == attempts - 1:
+                raise
+        else:
+            if resp.status_code != 429 and resp.status_code < 500:
+                return resp
+            if i == attempts - 1:
+                return resp
+        time.sleep(min(2 ** i, 20) + random.random())
+
+
 def send_text(to: str, body: str) -> str:
     """Send one text message, return the WhatsApp message id."""
-    resp = requests.post(
+    resp = _with_retries(lambda: requests.post(
         f"{GRAPH}/{config.WHATSAPP_PHONE_NUMBER_ID}/messages",
         headers={**_HEADERS, "Content-Type": "application/json"},
         json={
@@ -97,16 +115,16 @@ def send_text(to: str, body: str) -> str:
             "text": {"preview_url": False, "body": body},
         },
         timeout=30,
-    )
+    ))
     if resp.status_code >= 400:
         raise RuntimeError(f"WhatsApp send failed ({resp.status_code}): {resp.text}")
     return (resp.json().get("messages") or [{}])[0].get("id", "")
 
 
 def download_media(media_id: str) -> tuple[bytes, str]:
-    meta = requests.get(f"{GRAPH}/{media_id}", headers=_HEADERS, timeout=30)
+    meta = _with_retries(lambda: requests.get(f"{GRAPH}/{media_id}", headers=_HEADERS, timeout=30))
     meta.raise_for_status()
     info = meta.json()
-    data = requests.get(info["url"], headers=_HEADERS, timeout=60)
+    data = _with_retries(lambda: requests.get(info["url"], headers=_HEADERS, timeout=60))
     data.raise_for_status()
     return data.content, info.get("mime_type", "")

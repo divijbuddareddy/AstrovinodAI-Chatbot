@@ -16,6 +16,14 @@ app = FastAPI(title="AstroVinod WhatsApp Bot")
 
 
 @app.on_event("startup")
+async def _more_worker_threads() -> None:
+    # Each conversation waits mostly on Claude/WhatsApp (network I/O). The default pool of 40 threads would
+    # make the 41st simultaneous user wait in a queue, so allow many more to run at once.
+    import anyio.to_thread
+    anyio.to_thread.current_default_thread_limiter().total_tokens = 300
+
+
+@app.on_event("startup")
 def _connect_sheets() -> None:
     bot.store()  # fail fast if the database is misconfigured
     logging.getLogger("astrovinod").info("Storage ready: %s", type(bot.store()).__name__)
