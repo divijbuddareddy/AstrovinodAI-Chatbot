@@ -24,6 +24,14 @@ async def _more_worker_threads() -> None:
 
 
 @app.on_event("startup")
+def _build_places_index() -> None:
+    # Offline Indian places index (a few seconds, once per server start) - built in the background.
+    import threading
+    from app import places
+    threading.Thread(target=places.ensure_db, daemon=True, name="places-index").start()
+
+
+@app.on_event("startup")
 def _connect_sheets() -> None:
     bot.store()  # fail fast if the database is misconfigured
     logging.getLogger("astrovinod").info("Storage ready: %s", type(bot.store()).__name__)

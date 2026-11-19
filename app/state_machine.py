@@ -3,8 +3,9 @@
 Flow (from the client's "1. Welcome message.docx"):
   new user  -> WELCOME (asks: do you have a Kundali PDF? if yes upload it, if no share details)
   onboarding -> client uploads a Kundali PDF/image, or sends Name / DOB / Time / Place (in one or several messages).
-               The bot (bot.onboard) reads the details with Claude, asks only for what is missing,
-               then generates the chart and the master-prompt report.
+               The bot (bot.onboard) reads the details with Claude and asks only for what is missing.
+  confirm_place -> client confirms the birthplace found on the map (YES), or sends the correct one;
+               then the chart and the master-prompt report are generated.
   ready      -> questions, daily/weekly/monthly guidance, chart images/PDFs.
 
 Rows created by the old n8n workflow (collect_name ... confirm_horoscope) keep working.
@@ -19,6 +20,10 @@ GREETING = re.compile(r"^(hi+|hello|hey|start|namaste|namaskar|hii+|good (mornin
 HOROSCOPE_CMD = re.compile(
     r"^(please\s+)?((generate|create|make|send|show|get)\s+)?(me\s+)?(my\s+)?(full\s+)?"
     r"(horoscope|kundli|kundali|birth\s*chart|chart analysis)(\s+report)?(\s+please)?[.! ]*$", re.I)
+CONFIRM_YES = re.compile(
+    r"^(yes|y|ya|yah|yeah|yep|yup|yes sir|ok|okay|okk|k|correct|right|perfect|sahi|haan|han|ha|ji|ji haan|s|👍)"
+    r"( (it is|it'?s|its|that'?s|is|correct|right|sahi|hai|ji|haan|ha|sir|madam|guruji))*[.!👍🙏 ]*$", re.I)
+CONFIRM_NO = re.compile(r"^(no|n|nope|nahi|nahin|na|wrong|incorrect|not correct|galat|change( it)?|not this)[.! ]*$", re.I)
 RESET_CMD = re.compile(r"^(reset|restart|change (my )?details|update (my )?details|new profile)[.! ]*$", re.I)
 
 WELCOME = """🙏 *Welcome to ASTROVINOD AI*
@@ -40,7 +45,14 @@ QUESTIONS = {
     "birth_place": "📍 What is your *Place of Birth*? (City, State, Country)\n_Example: Mysuru, Karnataka, India_",
 }
 
+def place_confirmation(c: dict) -> str:
+    place = c.get("resolved_place") or c.get("birth_place", "")
+    return (f"📍 I found your place of birth as:\n*{place}*\n\n"
+            "Is this correct? Reply *YES*, or send the correct place (City, State, Country).")
+
+
 PROFILE_FIELDS = ("full_name", "dob", "birth_time", "birth_place")
+PLACE_FIELDS = ("birth_place", "resolved_place", "latitude", "longitude", "timezone")
 CHART_FIELDS = ("resolved_place", "latitude", "longitude", "timezone", "chart_summary", "kundli_pdf_notes")
 LEGACY_ONBOARDING = {"collect_name", "collect_dob", "collect_birth_time", "collect_birth_place"}
 
@@ -90,6 +102,18 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
             nxt = next_question(c)
             return StepResult(c, WELCOME if nxt == "full_name" else "🙏 Let's continue.\n\n" + QUESTIONS[nxt])
         return StepResult(c, "", action="onboard")
+
+    if state == "confirm_place":  # all details collected; client checks the place we found on the map
+        if CONFIRM_YES.match(msg):
+            return StepResult(c, "", action="finish_onboarding")
+        if is_media or not msg or GREETING.match(msg):
+            return StepResult(c, place_confirmation(c))
+        for k in PLACE_FIELDS:
+            c[k] = ""
+        c["conversation_state"] = "onboarding"
+        if CONFIRM_NO.match(msg):
+            return StepResult(c, "No problem. 🙏\n\n" + QUESTIONS["birth_place"])
+        return StepResult(c, "", action="onboard")  # the message is the corrected place
 
     if state == "confirm_horoscope":  # legacy n8n state
         if YES.match(msg) or HOROSCOPE_CMD.match(msg):

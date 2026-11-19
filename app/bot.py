@@ -1,7 +1,9 @@
 """Orchestrates one inbound WhatsApp message end to end."""
+import copy
 import json
 import logging
 import threading
+import time
 from collections import defaultdict
 
 import re
@@ -27,11 +29,67 @@ def store():
     return _store
 
 
-def reply(phone: str, text: str) -> None:
-    """Send (chunked) and log every outbound message to ChatHistory."""
+_tls = threading.local()  # per-thread: has this attempt already sent a real answer?
+
+# Clients never see "something went wrong". A failed step is retried quietly; if it still fails, the client
+# gets a calm holding message and the bot tries once more by itself a few minutes later.
+RETRY_DELAYS = (5, 20, 60)
+LATER_DELAY = 240
+HOLDING_MSG = ("🙏 I'm studying your chart carefully, the planetary calculations need a few more minutes. "
+               "I'll send you my answer shortly.")
+RESEND_MSG = "🙏 Thank you for your patience. Could you please send your last message once more? I'll reply right away."
+
+
+class _GaveUp(Exception):
+    """A step failed after all its quiet retries."""
+
+
+def reply(phone: str, text: str, progress: bool = False) -> None:
+    """Send (chunked) and log every outbound message to ChatHistory.
+    progress=True marks status lines ("Generating…") that are safe to send again if a step is retried."""
     for chunk in whatsapp.split_message(text):
         wa_id = whatsapp.send_text(phone, chunk)
         store().log_message(phone, "assistant", chunk, wa_id, "text")
+    if not progress:
+        _tls.sent = True
+
+
+def _with_retries(fn, customer: dict, *args) -> None:
+    """Run fn(customer, *args); on failure wait and retry from the same starting point.
+    Stops retrying once part of a real answer went out (repeating it would send duplicates)."""
+    snapshot = copy.deepcopy(customer)
+    for attempt, delay in enumerate((0, *RETRY_DELAYS)):
+        if delay:
+            time.sleep(delay)
+        _tls.sent, _tls.attempt = False, attempt
+        try:
+            fn(copy.deepcopy(snapshot) if attempt else customer, *args)
+            return
+        except _GaveUp:
+            raise
+        except Exception as exc:
+            log.exception("%s failed for %s (attempt %d)", fn.__name__, customer.get("phone_number"), attempt + 1)
+            if _tls.sent:
+                raise _GaveUp from exc
+    raise _GaveUp
+
+
+def _try_later(phone: str, fn, msg: dict | None) -> None:
+    """One more automatic attempt a few minutes later, with the latest saved profile."""
+    def run():
+        with _phone_locks[phone]:
+            try:
+                customer = store().get_customer(phone)
+                if customer:
+                    _with_retries(fn, customer, *((msg,) if msg else ()))
+                    return
+            except Exception:
+                log.exception("Delayed retry of %s failed for %s", fn.__name__, phone)
+            try:
+                reply(phone, RESEND_MSG)
+            except Exception:
+                log.exception("Could not send the resend request to %s", phone)
+    threading.Timer(LATER_DELAY, run).start()
 
 
 def handle(msg: dict) -> None:
@@ -47,6 +105,7 @@ def handle(msg: dict) -> None:
             _recent_ids.clear()
 
     with _phone_locks[phone]:
+        notified = False
         try:
             s = store()
             if s.message_seen(mid):
@@ -71,18 +130,29 @@ def handle(msg: dict) -> None:
             if result.reply:
                 reply(phone, result.reply)
 
-            if result.action == "onboard":
-                onboard(customer, msg)
-            elif result.action == "generate_horoscope":
-                generate_horoscope(customer)
-            elif result.action == "answer_question":
-                answer(customer, msg)
+            actions = {"onboard": (onboard, (msg,)), "finish_onboarding": (finish_onboarding, ()),
+                       "generate_horoscope": (generate_horoscope, ()), "answer_question": (answer, (msg,))}
+            if result.action in actions:
+                fn, args = actions[result.action]
+                _tls.sent = False
+                try:
+                    _with_retries(fn, customer, *args)
+                except Exception:
+                    notified = True
+                    if result.action == "onboard":
+                        reply(phone, RESEND_MSG)  # details may have half-changed: ask for the same message again
+                    else:  # chart reading / answer: hold on and try once more by ourselves
+                        reply(phone, HOLDING_MSG, progress=True)
+                        _try_later(phone, generate_horoscope if result.action == "finish_onboarding" else fn,
+                                   msg if args else None)
+                    raise
         except Exception:
             log.exception("Failed to handle message %s from %s", mid, phone)
-            try:
-                reply(phone, "🙏 Sorry, something went wrong on my side. Please try again in a few minutes.")
-            except Exception:
-                log.exception("Also failed to send the error reply")
+            if not notified:
+                try:
+                    reply(phone, RESEND_MSG)
+                except Exception:
+                    log.exception("Could not send the resend request to %s", phone)
 
 
 def ensure_chart(customer: dict, force: bool = False) -> dict:
@@ -158,7 +228,8 @@ def onboard(customer: dict, msg: dict) -> None:
         if mime not in ("application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif"):
             reply(phone, "🙏 I can read a Kundali as a *PDF* or a clear photo. Or simply answer:\n\n" + sm.QUESTIONS[current or "full_name"])
             return
-        reply(phone, "📎 Thank you! Reading your Kundali now…")
+        if not getattr(_tls, "attempt", 0):  # don't repeat it on a quiet retry
+            reply(phone, "📎 Thank you! Reading your Kundali now…", progress=True)
         caption = "" if text.startswith("Please analyse") else text
         details = ai.extract_birth_details(customer, caption, media, mime, sm.QUESTIONS.get(current, ""))
         _merge(customer, details)
@@ -221,16 +292,26 @@ def onboard(customer: dict, msg: dict) -> None:
             reply(phone, thanks + sm.QUESTIONS[nxt])
         return
 
+    # All four details are in: let the client check the place we found before making the chart.
+    customer["conversation_state"] = "confirm_place"
+    store().upsert_customer(customer)
+    reply(phone, sm.place_confirmation(customer))
+
+
+def finish_onboarding(customer: dict) -> None:
+    """Client confirmed the birthplace: show the profile, then make the chart and the full reading."""
+    phone = customer["phone_number"]
     customer["consent"] = "yes"
     customer["conversation_state"] = "ready"
     store().upsert_customer(customer)
     reply(phone, (
         f"🙏 Thank you, {_first(customer)} ji! Your birth profile:\n\n"
         f"• *Name:* {customer['full_name']}\n• *Date of Birth:* {_fmt_dob(customer['dob'])}\n"
-        f"• *Time of Birth:* {_fmt_time(customer['birth_time'])}\n• *Place of Birth:* {customer['birth_place']}\n\n"
+        f"• *Time of Birth:* {_fmt_time(customer['birth_time'])}\n"
+        f"• *Place of Birth:* {customer.get('resolved_place') or customer['birth_place']}\n\n"
         "🔭 Generating your Vedic birth chart and personalised horoscope. This takes 2-3 minutes…\n"
-        "_(Reply RESET anytime to correct your details.)_"))
-    generate_horoscope(customer)
+        "_(Reply RESET anytime to correct your details.)_"), progress=True)
+    _with_retries(generate_horoscope, customer)
 
 
 def _merge(customer: dict, details) -> None:

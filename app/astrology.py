@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import requests
 from timezonefinder import TimezoneFinder
 
-from . import config
+from . import config, places
 
 log = logging.getLogger("astrovinod")
 _tf = TimezoneFinder()
@@ -29,7 +29,8 @@ class GeocodingUnavailable(Exception):
 def _nominatim(place: str) -> dict | None:
     resp = requests.get(
         "https://nominatim.openstreetmap.org/search",
-        params={"q": place, "format": "jsonv2", "limit": 1},
+        # settlements only (not shops/banks named after the town), names in English
+        params={"q": place, "format": "jsonv2", "limit": 1, "featureType": "settlement", "accept-language": "en"},
         headers={"User-Agent": config.NOMINATIM_USER_AGENT},
         timeout=15,
     )
@@ -38,13 +39,14 @@ def _nominatim(place: str) -> dict | None:
     if not results:
         return None
     top = results[0]
-    return {"latitude": float(top["lat"]), "longitude": float(top["lon"]), "resolved_place": top.get("display_name", place)}
+    name = ", ".join(p.strip() for p in top.get("display_name", place).split(",") if not p.strip().isdigit())
+    return {"latitude": float(top["lat"]), "longitude": float(top["lon"]), "resolved_place": name}
 
 
 def _photon(place: str) -> dict | None:
     resp = requests.get(
         "https://photon.komoot.io/api/",
-        params={"q": place, "limit": 1, "lang": "en"},
+        params={"q": place, "limit": 1, "lang": "en", "osm_tag": "place"},  # towns/villages, not shops
         headers={"User-Agent": config.NOMINATIM_USER_AGENT},
         timeout=15,
     )
@@ -61,19 +63,30 @@ def _open_meteo(place: str) -> dict | None:
     parts = [x.strip() for x in place.split(",") if x.strip()]
     if not parts:
         return None
-    resp = requests.get(
-        "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": parts[0], "count": 10, "language": "en"},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    results = resp.json().get("results") or []
+    hints = {x.lower() for x in parts[1:]}
+
+    def search(**extra) -> list[dict]:
+        resp = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": parts[0], "count": 10, "language": "en", **extra},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json().get("results") or []
+
+    # Most clients are Indian: look in India first unless they named another country.
+    results = search(countryCode="IN") if (not hints or "india" in hints) else []
+    if not results and "india" not in hints:
+        results = search()
     if not results:
         return None
-    hints = {x.lower() for x in parts[1:]}
+
+    aliases = {"uae": "ae", "usa": "us", "america": "us", "uk": "gb", "england": "gb", "britain": "gb"}
+    codes = {aliases.get(h, h) for h in hints}
 
     def score(r: dict) -> int:  # prefer the state/country the user typed, then India
         s = 2 * sum(1 for k in ("admin1", "country") if str(r.get(k, "")).lower() in hints)
+        s += 2 if str(r.get("country_code", "")).lower() in codes else 0
         return s + (1 if r.get("country_code") == "IN" else 0)
 
     top = max(results, key=score)
@@ -91,6 +104,14 @@ def geocode(place: str) -> dict:
 
 @functools.lru_cache(maxsize=20000)
 def _geocode_cached(place: str) -> dict:  # exceptions are not cached, so failures get retried next time
+    local = None
+    try:
+        local = places.lookup(place)  # built-in list of Indian places: no internet needed
+    except Exception:
+        log.exception("Offline place lookup failed for %r", place)
+    if local and local.pop("strong"):
+        return local
+    # Not in the built-in list, or only an uncertain match there: ask the online map services too.
     errors = 0
     for service in (_nominatim, _photon, _open_meteo):
         try:
@@ -101,6 +122,8 @@ def _geocode_cached(place: str) -> dict:  # exceptions are not cached, so failur
             continue
         if found:
             return found
+    if local:
+        return local
     if errors == 3:
         raise GeocodingUnavailable(place)
     raise BirthplaceNotFound(place)
