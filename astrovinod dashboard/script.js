@@ -425,26 +425,15 @@
   })();
 
   /* ---------------- start ---------------- */
-  // 1) Private config.js on this computer -> real data, no login.
+  // Login is always asked. config.js (this computer only) just fills in the server address.
   const cfg = window.ASTRO_CONFIG;
-  if (cfg?.server && cfg?.key) {
-    state.base = cfg.server;
-    state.password = cfg.key;
-    $("logoutBtn").hidden = true;
-    enter();
-    return;
+  if (cfg?.server) {
+    $("apiBase").value = cfg.server;
+    $("apiBase").closest("label").hidden = true;
   }
-  // 2) Secret bookmark link  …/admin/#key=XXXX  -> real data, no login (key never sent in the URL to the server).
-  const hashKey = new URLSearchParams(location.hash.slice(1)).get("key");
-  if (hashKey && location.protocol.startsWith("http")) {
-    state.base = location.origin;
-    state.password = hashKey;
-    $("logoutBtn").hidden = true;
-    enter();
-    return;
-  }
-  // 3) Opened as a file without config.js: sample-data demo, no login.
-  if (location.protocol === "file:") {
+  if (location.hash) history.replaceState(null, "", location.pathname); // old #key= links no longer log in
+  // Opened as a file without config.js: sample-data demo.
+  if (location.protocol === "file:" && !cfg?.server) {
     state.demo = true;
     $("logoutBtn").hidden = true;
     enter();
