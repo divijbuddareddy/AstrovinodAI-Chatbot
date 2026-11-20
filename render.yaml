@@ -36,3 +36,5 @@ services:
         sync: false
       - key: DATABASE_URL   # Neon PostgreSQL connection string
         sync: false
+      - key: ADMIN_PASSWORD   # password for the owner dashboard at /admin/
+        sync: false

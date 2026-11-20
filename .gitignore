@@ -10,3 +10,6 @@ google_sheet_script/
 exported_data/
 .dist/
 render_env.txt
+
+# Dashboard private key (local only)
+astrovinod dashboard/config.js

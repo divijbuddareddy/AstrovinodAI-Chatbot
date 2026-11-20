@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AstroVinod Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===== Login screen ===== -->
+  <section id="login" class="login">
+    <form id="loginForm" class="login-card">
+      <div class="logo">🔮</div>
+      <h1>AstroVinod Dashboard</h1>
+      <p class="muted">Customer chats with the WhatsApp bot</p>
+
+      <label>Server address
+        <input id="apiBase" type="url" placeholder="https://astrovinodai-chatbot.onrender.com" value="https://astrovinodai-chatbot.onrender.com">
+      </label>
+      <label>Admin password
+        <input id="password" type="password" placeholder="ADMIN_PASSWORD" autocomplete="current-password">
+      </label>
+      <label class="check"><input id="remember" type="checkbox" checked> Remember on this device</label>
+
+      <button type="submit" class="btn primary">Open dashboard</button>
+      <button type="button" id="demoBtn" class="btn ghost">View demo with sample data</button>
+      <p id="loginError" class="error" hidden></p>
+    </form>
+  </section>
+
+  <!-- ===== Main app ===== -->
+  <main id="app" class="app" hidden>
+    <!-- Left: customer list -->
+    <aside class="sidebar">
+      <header class="side-head">
+        <div class="brand">🔮 AstroVinod</div>
+        <div class="side-actions">
+          <span id="liveDot" class="live" title="Auto-refresh every 15 seconds"></span>
+          <button id="refreshBtn" class="icon-btn" title="Refresh">⟳</button>
+          <button id="logoutBtn" class="icon-btn" title="Log out">⎋</button>
+        </div>
+      </header>
+      <div class="stats" id="stats"></div>
+      <div class="search">
+        <input id="search" type="search" placeholder="🔍  Search name or number">
+      </div>
+      <div class="filters">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="active">Set up</button>
+        <button class="chip" data-filter="onboarding">Registering</button>
+      </div>
+      <ul id="customerList" class="customer-list"></ul>
+    </aside>
+
+    <!-- Middle: chat -->
+    <section class="chat" id="chatPane">
+      <header class="chat-head">
+        <button id="backBtn" class="icon-btn back" title="Back">←</button>
+        <div class="avatar" id="chatAvatar"></div>
+        <div class="chat-title">
+          <div id="chatName">Select a customer</div>
+          <div id="chatPhone" class="muted small"></div>
+        </div>
+        <button id="profileBtn" class="icon-btn" title="Contact info" disabled>ⓘ</button>
+      </header>
+      <div id="messages" class="messages">
+        <div class="empty">Choose a customer on the left to read the conversation.</div>
+      </div>
+    </section>
+
+    <!-- Right: profile -->
+    <aside class="profile" id="profilePane">
+      <header class="profile-head">
+        <strong>Contact info</strong>
+        <button id="closeProfile" class="icon-btn" title="Close">✕</button>
+      </header>
+      <div id="profileBody" class="profile-body"></div>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="config.js"></script> <!-- private key, this computer only (optional) -->
+  <script src="script.js"></script>
+</body>
+</html>
