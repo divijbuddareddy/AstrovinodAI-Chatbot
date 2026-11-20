@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import admin, bot, config, legal, whatsapp
+from app import admin, bot, config, legal, payments, whatsapp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 app = FastAPI(title="AstroVinod WhatsApp Bot")
@@ -20,6 +20,7 @@ app = FastAPI(title="AstroVinod WhatsApp Bot")
 # (CORS lets the dashboard also be opened from a local file; the API still needs the password.)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["Authorization"])
 app.include_router(admin.router)
+app.include_router(payments.router)  # subscription checkout (dummy gateway for now)
 app.mount("/admin", StaticFiles(directory=admin.DASHBOARD_DIR, html=True, check_dir=False), name="admin")
 
 

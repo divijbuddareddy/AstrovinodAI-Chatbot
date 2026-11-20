@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, Header, HTTPException
 from sqlalchemy import func, select
 
-from . import bot
+from . import bot, plans
 from .db import chat_history, customers
 
 DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "astrovinod dashboard"
@@ -56,9 +56,12 @@ def list_customers(authorization: str | None = Header(None)) -> list[dict]:
     with bot.store().engine.connect() as conn:
         rows = conn.execute(q).mappings().all()
 
+    subs = plans.all_subscriptions()
     out = []
     for r in rows:
         state = r["conversation_state"] or "onboarding"
+        sub = subs.get(r["phone_number"])
+        plan = sub["plan"] if sub and plans.is_active(sub) else "free"
         out.append({
             "phone": r["phone_number"],
             "name": r["full_name"] or r["profile_name"],
@@ -72,10 +75,51 @@ def list_customers(authorization: str | None = Header(None)) -> list[dict]:
             "last_role": r["last_role"] or "",
             "last_time": r["last_time"] or r["updated_at"],
             "message_count": r["n"] or 0,
+            "plan": plan,
+            "chats_used": sub["chats_used"] if sub and plans.is_active(sub) else 0,
+            "chat_limit": plans.PLANS[plan]["chats"],
+            "plan_ends": sub["period_end"] if sub and plans.is_active(sub) else "",
             **_chart_highlights(r["chart_summary"]),
         })
     out.sort(key=lambda c: c["last_time"] or "", reverse=True)
     return out
+
+
+@router.get("/plans")
+def list_plans(authorization: str | None = Header(None)) -> dict:
+    """The four plans, who is on each paid plan now, and every payment (newest first)."""
+    _check(authorization)
+    with bot.store().engine.connect() as conn:
+        names = {r["phone_number"]: r["full_name"] or r["profile_name"]
+                 for r in conn.execute(select(customers.c.phone_number, customers.c.full_name,
+                                              customers.c.profile_name)).mappings()}
+    subs = plans.all_subscriptions()
+    pays = plans.all_payments()
+    last_paid = {}
+    for p in pays:  # newest first -> first paid row per customer is their latest payment
+        if p["status"] == "paid":
+            last_paid.setdefault((p["phone_number"], p["plan"]), p)
+
+    out = []
+    for key, p in plans.PLANS.items():
+        members = []
+        for phone, s in subs.items():
+            if s["plan"] == key and plans.is_active(s) and key != "free":
+                pay = last_paid.get((phone, key), {})
+                members.append({"phone": phone, "name": names.get(phone, ""), "chats_used": s["chats_used"],
+                                "started": s["period_start"], "ends": s["period_end"],
+                                "amount": pay.get("amount", p["price"]), "paid_at": pay.get("paid_at", ""),
+                                "ref": pay.get("gateway_ref", "")})
+        members.sort(key=lambda m: m["paid_at"], reverse=True)
+        out.append({"id": key, **p, "active": len(members),
+                    "revenue": sum(x["amount"] for x in pays if x["plan"] == key and x["status"] == "paid"),
+                    "members": members})
+    out[0]["active"] = max(0, len(names) - sum(o["active"] for o in out[1:]))  # everyone not on a paid plan
+    payments =[{"phone": x["phone_number"], "name": names.get(x["phone_number"], ""), "plan": x["plan"],
+                 "amount": x["amount"], "status": x["status"], "gateway": x["gateway"], "ref": x["gateway_ref"],
+                 "created_at": x["created_at"], "paid_at": x["paid_at"]} for x in pays]
+    return {"plans": out, "payments": payments,
+            "total_revenue": sum(x["amount"] for x in pays if x["status"] == "paid")}
 
 
 @router.get("/chats/{phone}")

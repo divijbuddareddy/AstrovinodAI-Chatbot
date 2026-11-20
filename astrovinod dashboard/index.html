@@ -37,6 +37,7 @@
         <div class="brand">🔮 AstroVinod</div>
         <div class="side-actions">
           <span id="liveDot" class="live" title="Auto-refresh every 15 seconds"></span>
+          <button id="plansBtn" class="plans-btn" title="View plans">💳 View plans</button>
           <button id="refreshBtn" class="icon-btn" title="Refresh">⟳</button>
           <button id="logoutBtn" class="icon-btn" title="Log out">⎋</button>
         </div>
@@ -77,6 +78,14 @@
       </header>
       <div id="profileBody" class="profile-body"></div>
     </aside>
+    <!-- Plans screen (covers the app) -->
+    <section id="plansView" class="plans-view" hidden>
+      <header class="plans-head">
+        <button id="closePlans" class="icon-btn" title="Back">←</button>
+        <strong>Subscription plans</strong>
+      </header>
+      <div id="plansBody" class="plans-body"><div class="empty">Loading…</div></div>
+    </section>
   </main>
 
   <div id="toast" class="toast" hidden></div>

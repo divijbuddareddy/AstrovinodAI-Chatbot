@@ -114,6 +114,10 @@
       nakshatra: pick(c, "nakshatra", "star"),
       joined: toDate(pick(c, "created_at", "joined_at", "first_seen")),
       count: pick(c, "message_count", "messages", "count"),
+      plan: String(pick(c, "plan") || "free").toLowerCase(),
+      chatsUsed: Number(pick(c, "chats_used") || 0),
+      chatLimit: c.chat_limit === undefined ? 10 : c.chat_limit, // null = unlimited
+      planEnds: toDate(pick(c, "plan_ends")),
     };
   }
 
@@ -196,7 +200,7 @@
         ${avatarHTML(c.name, c.phone)}
         <div class="info">
           <div class="row">
-            <span class="name">${esc(c.name || maskPhone(c.phone))}</span>
+            <span class="name">${esc(c.name || maskPhone(c.phone))}${planBadge(c.plan)}</span>
             <span class="time">${esc(listTime(c.time))}</span>
           </div>
           <div class="row">
@@ -243,6 +247,12 @@
         <div style="margin-top:10px"><span class="tag ${c.tag}">${c.tag === "active" ? "set up" : "still registering"}</span></div>
       </div>
       <div class="fields">
+      <div class="field"><span>Plan</span><b>${esc(PLAN_INFO[c.plan]?.icon || "")} ${esc((PLAN_INFO[c.plan]?.name) || c.plan.toUpperCase())}</b></div>
+      <div class="field"><span>Chats this month</span><b>${c.chatLimit == null
+        ? `${c.chatsUsed} used · unlimited`
+        : `${c.chatsUsed} of ${c.chatLimit} used · ${Math.max(0, c.chatLimit - c.chatsUsed)} left`}</b>
+        ${c.chatLimit == null ? "" : `<div class="usage"><span style="width:${Math.min(100, 100 * c.chatsUsed / (c.chatLimit || 1))}%"></span></div>`}</div>
+      ${f(c.plan === "free" ? "Chats renew on" : "Plan valid till", c.planEnds ? c.planEnds.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) : "")}
       ${f("Date of birth", c.dob)}
       ${f("Time of birth", c.tob)}
       ${f("Place of birth", c.place)}
@@ -256,6 +266,85 @@
   }
 
   const current = () => state.customers.find((c) => c.phone === state.selected);
+
+  /* ---------------- subscription plans ---------------- */
+  const PLAN_INFO = {
+    free: { name: "FREE", icon: "🆓" }, gold: { name: "GOLD", icon: "🥇" },
+    platinum: { name: "PLATINUM", icon: "💎" }, vip: { name: "VIP", icon: "👑" },
+  };
+  const planBadge = (p) => (p && p !== "free" && PLAN_INFO[p])
+    ? `<span class="plan-badge ${p}">${PLAN_INFO[p].name}</span>` : "";
+  const rupees = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
+  const shortDate = (v) => { const d = toDate(v); return d ? d.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) : "—"; };
+
+  async function loadPlans() {
+    const data = await api("/admin/api/plans");
+    renderPlans(data);
+  }
+
+  function renderPlans(data) {
+    const plans = data.plans || [];
+    const pays = data.payments || [];
+    const paidCount = pays.filter((p) => p.status === "paid").length;
+    const subscribers = plans.filter((p) => p.id !== "free").reduce((n, p) => n + (p.active || 0), 0);
+
+    const cards = plans.map((p) => {
+      const info = PLAN_INFO[p.id] || { name: p.name, icon: "" };
+      const chats = p.chats == null ? "Unlimited chats" : `${p.chats} chats`;
+      let members;
+      if (p.id === "free") {
+        members = `<div class="no-members">${p.active || 0} customer${p.active === 1 ? "" : "s"} on the free plan.</div>`;
+      } else if (!p.members?.length) {
+        members = `<div class="no-members">No active subscribers yet.</div>`;
+      } else {
+        members = p.members.map((m) => `
+          <div class="member" data-phone="${esc(m.phone)}">
+            <div class="who"><span>${esc(m.name || maskPhone(m.phone))}</span><span>${rupees(m.amount)}</span></div>
+            <div class="sub">${esc(maskPhone(m.phone))} · paid ${esc(shortDate(m.paid_at || m.started))}</div>
+            <div class="sub">Valid till ${esc(shortDate(m.ends))} · ${m.chats_used} chat${m.chats_used === 1 ? "" : "s"} used${p.chats == null ? "" : " of " + p.chats}${m.ref ? " · " + esc(m.ref) : ""}</div>
+          </div>`).join("");
+      }
+      return `
+        <div class="plan-card ${esc(p.id)}">
+          <h3>${info.icon} ${esc(info.name)}</h3>
+          <div class="price">${p.price ? rupees(p.price) : "Free"} <small>/ month</small></div>
+          <div class="facts">${chats} per month${p.id !== "free" ? ` · ${p.active || 0} active · ${rupees(p.revenue)} earned` : ""}</div>
+          ${p.id !== "free" ? `<div class="members-title">Paid customers</div>` : ""}
+          ${members}
+        </div>`;
+    }).join("");
+
+    const rows = pays.length ? pays.map((x) => `
+      <tr>
+        <td>${esc(shortDate(x.paid_at || x.created_at))}</td>
+        <td>${esc(x.name || "—")}<br><span class="muted">${esc(maskPhone(x.phone))}</span></td>
+        <td>${esc((PLAN_INFO[x.plan] || {}).name || x.plan)}</td>
+        <td>${rupees(x.amount)}</td>
+        <td><span class="status ${esc(x.status)}">${x.status === "created" ? "link sent" : esc(x.status)}</span></td>
+        <td class="muted">${esc(x.ref || "—")}${x.gateway === "dummy" ? " (test)" : ""}</td>
+      </tr>`).join("")
+      : `<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">No payments yet.</td></tr>`;
+
+    $("plansBody").innerHTML = `
+      <div class="plans-summary">
+        <div class="stat"><b>${rupees(data.total_revenue)}</b><span>Total received</span></div>
+        <div class="stat"><b>${subscribers}</b><span>Active paid subscribers</span></div>
+        <div class="stat"><b>${paidCount}</b><span>Payments</span></div>
+      </div>
+      <div class="plan-cards">${cards}</div>
+      <div class="section-title">All payments</div>
+      <div class="pay-table-wrap"><table class="pay-table">
+        <thead><tr><th>Date</th><th>Customer</th><th>Plan</th><th>Amount</th><th>Status</th><th>Reference</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+  }
+
+  async function openPlans() {
+    $("plansView").hidden = false;
+    $("plansBody").innerHTML = `<div class="empty">Loading…</div>`;
+    try { await loadPlans(); }
+    catch (e) { $("plansBody").innerHTML = `<div class="empty">Could not load plans: ${esc(e.message)}</div>`; }
+  }
 
   /* ---------------- actions ---------------- */
   async function selectCustomer(phone) {
@@ -278,6 +367,7 @@
     try {
       await loadCustomers();
       if (state.selected) { renderProfile(); await loadChat(state.selected, true); }
+      if (!$("plansView").hidden) await loadPlans();
     } catch (e) {
       setLive(false);
       if (!silent) toast(e.message);
@@ -368,6 +458,14 @@
   document.querySelector(".chat-title").addEventListener("click", () => {
     if (state.selected) $("app").classList.add("show-profile");
   });
+  $("plansBtn").addEventListener("click", openPlans);
+  $("closePlans").addEventListener("click", () => ($("plansView").hidden = true));
+  $("plansBody").addEventListener("click", (e) => {
+    const m = e.target.closest(".member");
+    if (!m) return;
+    $("plansView").hidden = true;
+    selectCustomer(m.dataset.phone);
+  });
   $("closeProfile").addEventListener("click", () => $("app").classList.remove("show-profile"));
   $("backBtn").addEventListener("click", () => $("app").classList.remove("view-chat", "show-profile"));
 
@@ -380,12 +478,12 @@
     const now = Date.now(), min = 60e3, day = 864e5;
     const customers = [
       { phone: "919812345670", name: "Ravi Kumar", status: "active", dob: "14-08-1992", tob: "06:45 AM", place: "Hyderabad, Telangana",
-        lagna: "Leo", moon_sign: "Capricorn", nakshatra: "Shravana", created_at: now - 6 * day },
+        lagna: "Leo", moon_sign: "Capricorn", nakshatra: "Shravana", created_at: now - 6 * day, plan: "gold", chats_used: 12, chat_limit: 100, plan_ends: now + 28 * day },
       { phone: "919900112233", name: "Priya S.", status: "active", dob: "02-03-1995", tob: "11:20 PM", place: "Chennai, Tamil Nadu",
-        lagna: "Scorpio", moon_sign: "Taurus", nakshatra: "Rohini", created_at: now - 3 * day },
+        lagna: "Scorpio", moon_sign: "Taurus", nakshatra: "Rohini", created_at: now - 3 * day, plan: "free", chats_used: 9, chat_limit: 10, plan_ends: now + 27 * day },
       { phone: "918712340000", name: "", status: "onboarding", created_at: now - day },
       { phone: "919845001122", name: "Anil Reddy", status: "active", dob: "21-11-1988", tob: "03:10 PM", place: "Vijayawada, Andhra Pradesh",
-        lagna: "Aries", moon_sign: "Sagittarius", nakshatra: "Moola", created_at: now - 10 * day },
+        lagna: "Aries", moon_sign: "Sagittarius", nakshatra: "Moola", created_at: now - 10 * day, plan: "vip", chats_used: 47, chat_limit: null, plan_ends: now + 25 * day },
     ];
     const chats = {
       "919812345670": [
@@ -411,6 +509,24 @@
     return {
       async get(path) {
         await new Promise((r) => setTimeout(r, 150));
+        const iso = (t) => new Date(t).toISOString();
+        if (path.startsWith("/admin/api/plans")) {
+          const pays = [
+            { phone: "919812345670", name: "Ravi Kumar", plan: "gold", amount: 149, status: "paid", gateway: "dummy", ref: "TEST-1A2B3C", created_at: iso(now - 2 * day), paid_at: iso(now - 2 * day) },
+            { phone: "919845001122", name: "Anil Reddy", plan: "vip", amount: 5999, status: "paid", gateway: "dummy", ref: "TEST-9F8E7D", created_at: iso(now - 5 * day), paid_at: iso(now - 5 * day) },
+            { phone: "919900112233", name: "Priya S.", plan: "platinum", amount: 999, status: "created", gateway: "dummy", ref: "", created_at: iso(now - 3 * 60 * min), paid_at: "" },
+          ];
+          const member = (p, used) => ({ phone: p.phone, name: p.name, chats_used: used, started: p.paid_at, ends: iso(toDate(p.paid_at).getTime() + 30 * day), amount: p.amount, paid_at: p.paid_at, ref: p.ref });
+          return {
+            total_revenue: 6148, payments: pays,
+            plans: [
+              { id: "free", name: "FREE", price: 0, chats: 10, active: 2, revenue: 0, members: [] },
+              { id: "gold", name: "GOLD", price: 149, chats: 100, active: 1, revenue: 149, members: [member(pays[0], 12)] },
+              { id: "platinum", name: "PLATINUM", price: 999, chats: 500, active: 0, revenue: 0, members: [] },
+              { id: "vip", name: "VIP", price: 5999, chats: null, active: 1, revenue: 5999, members: [member(pays[1], 47)] },
+            ],
+          };
+        }
         if (path.startsWith("/admin/api/customers")) {
           return customers.map((c) => {
             const m = chats[c.phone] || [];

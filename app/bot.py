@@ -10,7 +10,7 @@ import re
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from . import ai, astrology, intents, vedic, whatsapp
+from . import ai, astrology, intents, plans, vedic, whatsapp
 from .sheets import open_store
 from . import state_machine as sm
 from .state_machine import step
@@ -122,10 +122,27 @@ def handle(msg: dict) -> None:
             s.log_message(phone, "user", logged_text, mid, msg["type"])
 
             existing = s.get_customer(phone)
+            was_ready = (existing or {}).get("conversation_state") == "ready"
+
+            # Subscription commands (PLANS / GOLD / PLATINUM / VIP) - never counted as chats.
+            if was_ready and not msg["media_id"]:
+                plan_reply = plans.command_reply(existing, msg["text"])
+                if plan_reply:
+                    reply(phone, plan_reply)
+                    return
+
             result = step(existing, phone, msg["profile_name"], msg["text"], msg["type"])
             customer = result.customer
             customer["last_message_id"] = mid
             s.upsert_customer(customer)
+
+            # A question after setup counts as one chat; when the plan's chats are used up, show the plans instead.
+            counted = result.action == "answer_question" or (result.action == "generate_horoscope" and was_ready)
+            if counted:
+                blocked = plans.limit_message(customer)
+                if blocked:
+                    reply(phone, blocked)
+                    return
 
             if result.reply:
                 reply(phone, result.reply)
@@ -146,6 +163,13 @@ def handle(msg: dict) -> None:
                         _try_later(phone, generate_horoscope if result.action == "finish_onboarding" else fn,
                                    msg if args else None)
                     raise
+                if counted:
+                    try:
+                        note = plans.use_chat(phone)
+                        if note:
+                            reply(phone, note)
+                    except Exception:
+                        log.exception("Could not count the chat for %s", phone)
         except Exception:
             log.exception("Failed to handle message %s from %s", mid, phone)
             if not notified:
