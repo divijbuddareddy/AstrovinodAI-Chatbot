@@ -188,12 +188,21 @@ def command_reply(customer: dict, text: str) -> str:
 
 # ---------------------------------------------------------------- payments
 def create_payment(phone: str, plan: str) -> str:
+    from . import phonepe
     token = secrets.token_urlsafe(16)
     with _engine().begin() as conn:
         conn.execute(insert(payments).values(token=token, phone_number=phone, plan=plan,
-                                             amount=PLANS[plan]["price"], status="created", gateway="dummy",
+                                             amount=PLANS[plan]["price"], status="created",
+                                             gateway="phonepe" if phonepe.enabled() else "dummy",
                                              created_at=_iso(_now())))
     return token
+
+
+def set_gateway_ref(token: str, ref: str) -> None:
+    """Remember the gateway's order id for a payment attempt (before it is paid)."""
+    with _engine().begin() as conn:
+        conn.execute(update(payments).where(payments.c.token == token, payments.c.status == "created")
+                     .values(gateway_ref=ref))
 
 
 def get_payment(token: str) -> dict | None:
@@ -212,7 +221,9 @@ def mark_paid(token: str, gateway_ref: str) -> dict | None:
     now = _now()
     engine = _engine()
     with engine.begin() as conn:
-        done = conn.execute(update(payments).where(payments.c.token == token, payments.c.status == "created")
+        # "cancelled" too: someone may press Cancel on our page after actually paying in PhonePe.
+        done = conn.execute(update(payments).where(payments.c.token == token,
+                                                   payments.c.status.in_(("created", "cancelled")))
                             .values(status="paid", paid_at=_iso(now), gateway_ref=gateway_ref))
         if done.rowcount != 1:
             return None
