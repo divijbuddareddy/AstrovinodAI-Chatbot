@@ -21,6 +21,14 @@ META_APP_SECRET = os.getenv("META_APP_SECRET", "").strip()
 ANTHROPIC_API_KEY = _req("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-opus-5-5")
 
+# Which AI writes the replies: claude (default) | gemini | openai. Gemini/OpenAI need their key AND model;
+# if either is missing the bot keeps using Claude.
+AI_PROVIDER = os.getenv("AI_PROVIDER", "claude").strip().lower()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "").strip()
+
 PROKERALA_CLIENT_ID = _req("PROKERALA_CLIENT_ID")
 PROKERALA_CLIENT_SECRET = _req("PROKERALA_CLIENT_SECRET")
 PROKERALA_AYANAMSA = os.getenv("PROKERALA_AYANAMSA", "1")

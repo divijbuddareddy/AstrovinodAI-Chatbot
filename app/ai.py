@@ -1,19 +1,16 @@
-"""Claude calls for horoscope reports and conversational answers."""
-import base64
+"""AI prompts for horoscope reports and conversational answers.
+
+The prompts live here and are the same for every AI. Which AI answers (Claude, Gemini or OpenAI) is chosen with the
+AI_PROVIDER setting - see app/providers/.
+"""
 import json
 from datetime import date
 
-import anthropic
 from pydantic import BaseModel, Field
 
-from . import config
+from . import providers
 
-# Retries (with backoff) cover rate limits (429), "overloaded" (529), 5xx and network blips under heavy load.
-client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=6, timeout=600)
-
-# Server-side refusal fallback is supported on these models; skip it for others.
-_FALLBACK_MODELS = {"claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2", "claude-fable-5-1", "claude-opus-5"}
-_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+_FILE_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"}
 
 STYLE = """How you write (the reply is sent on WhatsApp):
 - WhatsApp formatting only: *bold*, _italic_, simple "•" bullet lines. No markdown headings (#), tables or code blocks.
@@ -66,26 +63,11 @@ def _profile_block(c: dict) -> str:
 
 
 def _call(system: str, messages: list[dict], effort: str = "medium") -> str:
-    kwargs = dict(
-        model=config.CLAUDE_MODEL,
-        max_tokens=16000,
-        system=system,
-        messages=messages,
-        output_config={"effort": effort},
-    )
-    if config.CLAUDE_MODEL in _FALLBACK_MODELS:
-        resp = client.beta.messages.create(
-            betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs
-        )
-    else:
-        resp = client.messages.create(**kwargs)
+    return providers.get().generate(system, messages, effort)
 
-    if resp.stop_reason == "refusal":
-        return "🙏 I'm sorry, I can't help with that request. Please ask me something else about your chart."
-    text = "\n".join(b.text for b in resp.content if b.type == "text").strip()
-    if not text:
-        raise RuntimeError(f"Claude returned no text (stop_reason={resp.stop_reason})")
-    return text
+
+def _file_part(media: bytes | None, media_mime: str) -> list[dict]:
+    return [{"type": "file", "mime": media_mime, "data": media}] if media and media_mime in _FILE_TYPES else []
 
 
 # ---- Client-supplied guidance formats (3. Daily / 4. Weekly / 5. Monthly Guidance Prompt.docx) ----
@@ -273,14 +255,7 @@ PERIOD DATA (transits, planet events, daily Moon, panchang)
 
 def answer_question(customer: dict, chart: dict, now_ctx: dict, history: list[dict], question: str,
                     media: bytes | None = None, media_mime: str = "") -> str:
-    content: list[dict] = []
-    if media:
-        b64 = base64.standard_b64encode(media).decode()
-        if media_mime in _IMAGE_TYPES:
-            content.append({"type": "image", "source": {"type": "base64", "media_type": media_mime, "data": b64}})
-        elif media_mime == "application/pdf":
-            content.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}})
-    content.append({"type": "text", "text": question})
+    content = _file_part(media, media_mime) + [{"type": "text", "text": question}]
     return _call(_system(customer, chart, now_ctx), _with_history(history, content), effort="medium")
 
 
@@ -314,13 +289,7 @@ class BirthDetails(BaseModel):
 def extract_birth_details(known: dict, text: str = "", media: bytes | None = None, media_mime: str = "",
                           last_bot_message: str = "") -> BirthDetails:
     """Read birth details from a free-text message or an uploaded kundali PDF/image (welcome flow)."""
-    content: list[dict] = []
-    if media:
-        b64 = base64.standard_b64encode(media).decode()
-        if media_mime == "application/pdf":
-            content.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}})
-        elif media_mime in _IMAGE_TYPES:
-            content.append({"type": "image", "source": {"type": "base64", "media_type": media_mime, "data": b64}})
+    content = _file_part(media, media_mime)
     known_json = json.dumps({k: known.get(k, "") for k in ("full_name", "dob", "birth_time", "birth_place")})
     content.append({"type": "text", "text": f"""Extract birth details for an astrology client.
 
@@ -333,12 +302,4 @@ Rules:
 - Dates are day-first (Indian format): 05/06/1990 is 5 June 1990. Accept written months too.
 - Convert times to 24-hour HH:MM. If no AM/PM is given and the hour is 1-12, set time_is_ambiguous (unless context such as "evening" makes it clear).
 - Place: "City, State, Country". You may add the state/country when the city is well known and unambiguous."""})
-    resp = client.messages.parse(
-        model=config.CLAUDE_MODEL,
-        max_tokens=16000,
-        messages=[{"role": "user", "content": content}],
-        output_format=BirthDetails,
-    )
-    if resp.parsed_output is None:
-        raise RuntimeError(f"Birth detail extraction failed (stop_reason={resp.stop_reason})")
-    return resp.parsed_output
+    return providers.get().extract(content, BirthDetails)
