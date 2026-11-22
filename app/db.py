@@ -12,8 +12,8 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import (Column, Integer, MetaData, String, Table, Text, create_engine, insert, select,
-                        update)
+from sqlalchemy import (Column, Integer, MetaData, String, Table, Text, create_engine, insert, inspect, select,
+                        text, update)
 
 from . import config
 
@@ -23,7 +23,7 @@ metadata = MetaData()
 CUSTOMER_COLS = [
     "profile_name", "full_name", "dob", "birth_time", "birth_place", "resolved_place", "latitude", "longitude",
     "timezone", "consent", "conversation_state", "chart_summary", "kundli_pdf_notes", "last_message_id",
-    "created_at", "updated_at",
+    "created_at", "updated_at", "language",
 ]
 
 customers = Table(
@@ -75,8 +75,20 @@ class DbStore:
         pool = {"pool_size": 20, "max_overflow": 30, "pool_timeout": 60} if url.startswith("postgresql") else {}
         self.engine = create_engine(url, pool_pre_ping=True, pool_recycle=300, connect_args=connect_args, **pool)
         metadata.create_all(self.engine)
+        self._add_missing_columns()
         self._lock = threading.Lock()
         log.info("Database ready (%s)", self.engine.url.get_backend_name())
+
+    def _add_missing_columns(self) -> None:
+        """New customer fields (e.g. language) are added to an existing database automatically; data is kept."""
+        have = {c["name"] for c in inspect(self.engine).get_columns("customers")}
+        missing = [c for c in CUSTOMER_COLS if c not in have]
+        if not missing:
+            return
+        with self.engine.begin() as conn:
+            for col in missing:
+                conn.execute(text(f"ALTER TABLE customers ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"))
+        log.info("Added customer column(s): %s", ", ".join(missing))
 
     # ---------- customers ----------
     def get_customer(self, phone: str) -> dict | None:

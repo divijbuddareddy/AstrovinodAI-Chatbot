@@ -75,6 +75,7 @@ def list_customers(authorization: str | None = Header(None)) -> list[dict]:
             "last_role": r["last_role"] or "",
             "last_time": r["last_time"] or r["updated_at"],
             "message_count": r["n"] or 0,
+            "language": r.get("language", "") if hasattr(r, "get") else "",
             "plan": plan,
             "chats_used": sub["chats_used"] if sub and plans.is_active(sub) else 0,
             "chat_limit": plans.PLANS[plan]["chats"],

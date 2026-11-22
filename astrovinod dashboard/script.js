@@ -114,6 +114,7 @@
       nakshatra: pick(c, "nakshatra", "star"),
       joined: toDate(pick(c, "created_at", "joined_at", "first_seen")),
       count: pick(c, "message_count", "messages", "count"),
+      language: pick(c, "language"),
       plan: String(pick(c, "plan") || "free").toLowerCase(),
       chatsUsed: Number(pick(c, "chats_used") || 0),
       chatLimit: c.chat_limit === undefined ? 10 : c.chat_limit, // null = unlimited
@@ -253,6 +254,7 @@
         : `${c.chatsUsed} of ${c.chatLimit} used · ${Math.max(0, c.chatLimit - c.chatsUsed)} left`}</b>
         ${c.chatLimit == null ? "" : `<div class="usage"><span style="width:${Math.min(100, 100 * c.chatsUsed / (c.chatLimit || 1))}%"></span></div>`}</div>
       ${f(c.plan === "free" ? "Chats renew on" : "Plan valid till", c.planEnds ? c.planEnds.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) : "")}
+      ${f("Language", c.language || "Not chosen (replies match the customer's language)")}
       ${f("Date of birth", c.dob)}
       ${f("Time of birth", c.tob)}
       ${f("Place of birth", c.place)}

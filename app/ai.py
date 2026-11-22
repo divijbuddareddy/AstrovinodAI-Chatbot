@@ -161,8 +161,24 @@ GUIDANCE_FORMATS = {
 }
 
 
+def _language_rule(customer: dict) -> str:
+    lang = (customer.get("language") or "").strip()
+    if not lang:
+        return ""
+    if lang.lower() == "hinglish":
+        how = "Hinglish (Hindi written in English/Roman letters, mixed with English words)"
+    elif lang.lower() == "english":
+        how = "English"
+    else:
+        how = f"{lang}, written in the {lang} script"
+    return (f"\n\nLANGUAGE (the client chose this - it overrides any other language instruction): write your ENTIRE reply "
+            f"ONLY in {how}, even if the client writes to you in English or another language, and even if earlier "
+            f"messages in this chat were in another language. Section titles and bullet points too. Astrology terms "
+            f"(Lagna, Nakshatra, Mahadasha, house names) may stay as they are, but explain them in {lang}.")
+
+
 def _system(customer: dict, chart: dict, now_ctx: dict) -> str:
-    return f"""{BASE_SYSTEM}
+    return f"""{BASE_SYSTEM}{_language_rule(customer)}
 
 Today's date: {date.today().isoformat()}
 

@@ -45,6 +45,61 @@ QUESTIONS = {
     "birth_place": "📍 What is your *Place of Birth*? (City, State, Country)\n_Example: Mysuru, Karnataka, India_",
 }
 
+LANGUAGE_Q = ("🗣️ *In which language would you like your horoscope and all my replies?*\n\n"
+              "For example: *English, Hindi, Telugu, Kannada, Tamil, Malayalam, Marathi, Bengali, Gujarati, "
+              "Punjabi, Odia* or *Hinglish*\n\nJust reply with the language name.")
+LANGUAGE_RETRY = "🙏 Please reply with just the language name, for example *Hindi*, *Telugu* or *English*."
+
+# name -> spellings / native-script names customers may type
+LANGUAGES = {
+    "English": ["english", "eng", "angrezi", "inglish"],
+    "Hindi": ["hindi", "hindhi", "हिंदी", "हिन्दी"],
+    "Hinglish": ["hinglish"],
+    "Telugu": ["telugu", "telgu", "తెలుగు"],
+    "Kannada": ["kannada", "kanada", "kannad", "ಕನ್ನಡ"],
+    "Tamil": ["tamil", "thamizh", "tamizh", "தமிழ்"],
+    "Malayalam": ["malayalam", "malyalam", "മലയാളം"],
+    "Marathi": ["marathi", "मराठी"],
+    "Bengali": ["bengali", "bangla", "বাংলা"],
+    "Gujarati": ["gujarati", "gujrati", "ગુજરાતી"],
+    "Punjabi": ["punjabi", "panjabi", "ਪੰਜਾਬੀ"],
+    "Odia": ["odia", "oriya", "ଓଡ଼ିଆ"],
+    "Assamese": ["assamese", "অসমীয়া"],
+    "Urdu": ["urdu", "اردو"],
+    "Sanskrit": ["sanskrit", "संस्कृत"],
+    "Nepali": ["nepali", "नेपाली"],
+    "Konkani": ["konkani", "कोंकणी"],
+    "Sindhi": ["sindhi"],
+    "Maithili": ["maithili"],
+    "Bhojpuri": ["bhojpuri"],
+    "Tulu": ["tulu"],
+    "Arabic": ["arabic"],
+    "French": ["french"],
+    "Spanish": ["spanish"],
+    "German": ["german"],
+}
+_LANG_FILLER = re.compile(r"\b(in|language|lang|bhasha|bhasa|bhaasha|please|pls|plz|only|me|mein|main|my|is|i want|want|prefer|choose|reply|replies|ok|okay)\b", re.I)
+
+
+def parse_language(text: str) -> str:
+    """'Hindi', 'in telugu please', 'తెలుగు' -> canonical language name; '' if not recognised."""
+    t = (text or "").strip().lower()
+    t = re.sub(r"[.!,🙏👍]", " ", t)
+    t = _LANG_FILLER.sub(" ", t)
+    t = " ".join(t.split())
+    if not t:
+        return ""
+    for name, spellings in LANGUAGES.items():
+        if t in spellings:
+            return name
+    words = t.split()
+    found = [name for name, spellings in LANGUAGES.items() if any(w in spellings for w in words)]
+    return found[0] if len(found) == 1 else ""
+
+
+LANGUAGE_CMD = re.compile(r"^\s*(change\s+(my\s+)?)?(language|bhasha|bhasa)(\s+to)?\b\s*(?P<rest>.*)$", re.I)
+
+
 def place_confirmation(c: dict) -> str:
     place = c.get("resolved_place") or c.get("birth_place", "")
     return (f"📍 I found your place of birth as:\n*{place}*\n\n"
@@ -87,7 +142,7 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
     state = c.get("conversation_state") or "onboarding"
 
     if RESET_CMD.match(msg):
-        for k in PROFILE_FIELDS + CHART_FIELDS + ("consent",):
+        for k in PROFILE_FIELDS + CHART_FIELDS + ("consent", "language"):
             c[k] = ""
         c["conversation_state"] = "onboarding"
         return StepResult(c, "Sure, let's set up your birth profile again. 🙏\n\n" + QUESTIONS["full_name"])
@@ -105,6 +160,9 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
 
     if state == "confirm_place":  # all details collected; client checks the place we found on the map
         if CONFIRM_YES.match(msg):
+            if not c.get("language"):  # ask the language once, before the horoscope is written
+                c["conversation_state"] = "choose_language"
+                return StepResult(c, LANGUAGE_Q)
             return StepResult(c, "", action="finish_onboarding")
         if is_media or not msg or GREETING.match(msg):
             return StepResult(c, place_confirmation(c))
@@ -114,6 +172,20 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
         if CONFIRM_NO.match(msg):
             return StepResult(c, "No problem. 🙏\n\n" + QUESTIONS["birth_place"])
         return StepResult(c, "", action="onboard")  # the message is the corrected place
+
+    if state == "choose_language":  # birthplace confirmed; language chosen -> make the chart and horoscope
+        lang = parse_language(msg)
+        if not lang:
+            return StepResult(c, LANGUAGE_RETRY)
+        c["language"] = lang
+        return StepResult(c, "", action="finish_onboarding")
+
+    if state == "change_language":  # a ready client asked to change the language
+        lang = parse_language(msg)
+        if not lang:
+            return StepResult(c, LANGUAGE_RETRY)
+        c["language"], c["conversation_state"] = lang, "ready"
+        return StepResult(c, f"✅ Done! From now on I will reply in *{lang}*. 🙏")
 
     if state == "confirm_horoscope":  # legacy n8n state
         if YES.match(msg) or HOROSCOPE_CMD.match(msg):
@@ -128,6 +200,14 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
         if not has_details(c):
             c["conversation_state"] = "onboarding"
             return StepResult(c, WELCOME)
+        m = LANGUAGE_CMD.match(msg)
+        lang = parse_language(m.group("rest")) if m else ""
+        if m and (lang or not m.group("rest").strip(" .!?")):  # "LANGUAGE", "change language", "language hindi"
+            if lang:
+                c["language"] = lang
+                return StepResult(c, f"✅ Done! From now on I will reply in *{lang}*. 🙏")
+            c["conversation_state"] = "change_language"
+            return StepResult(c, LANGUAGE_Q)
         if HOROSCOPE_CMD.match(msg):
             c["consent"] = "yes"
             return StepResult(c, "🔭 Preparing your complete birth chart analysis. This takes 2-3 minutes…",
