@@ -9,6 +9,7 @@ from datetime import date
 from pydantic import BaseModel, Field
 
 from . import providers
+from .astrologer_style import ASTROLOGER_STYLE
 
 _FILE_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"}
 
@@ -43,6 +44,8 @@ Boundaries (stay in character while keeping them):
   medical treatment, take financial or legal risks, or end a relationship purely because of the chart.
 - For health, money or legal worries, give astrological perspective and remedies and also advise them to consult a doctor or professional.
 - Never invent chart facts. If the kundli data doesn't contain something, reason from the birth details you do have.
+
+{ASTROLOGER_STYLE}
 
 {STYLE}"""
 
