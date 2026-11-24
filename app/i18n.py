@@ -402,7 +402,11 @@ def hint(field: str, lang: str | None = None) -> str:
 
 
 def welcome(lang: str | None = None) -> str:
-    return f"{TITLE}\n{t('subtitle', lang)}\n\n{t('welcome_body', lang)}\n\n{question('full_name', lang)}"
+    """Sent after the language is chosen. The welcome IMAGE already greeted the client, so only the one line about
+    the 4 details (middle paragraph of welcome_body) + the name question."""
+    parts = t("welcome_body", lang).split("\n\n")
+    intro = parts[1] if len(parts) > 1 else parts[0]
+    return f"{intro}\n\n{question('full_name', lang)}"
 
 
 def native_name(lang: str) -> str:
