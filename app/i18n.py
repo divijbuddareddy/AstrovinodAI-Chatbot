@@ -26,7 +26,8 @@ PDF_BEFORE_LANGUAGE = ("🙏 Thank you! Please choose your language first, then 
 
 # Images sent to a new client before the language menu (files in /static, served by the bot itself).
 INTRO_IMAGES = ["static/welcome.jpg", "static/instructions.jpg"]
-LANGUAGE_IMAGE = "static/language.jpg"  # "Choose Your Language" picture, sent just before the tap menu
+# "Choose Your Language" picture before the tap menu - switched off (set to "static/language.jpg" to bring it back).
+LANGUAGE_IMAGE = ""
 
 TITLE = "🙏 *Welcome to ASTROVINOD AI*"
 

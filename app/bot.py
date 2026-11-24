@@ -215,9 +215,10 @@ def send_intro(phone: str) -> None:
 
 def send_language_menu(phone: str, with_image: bool = False) -> None:
     """Tap-to-choose language list (falls back to a numbered text menu if WhatsApp rejects the list)."""
-    if with_image:
+    show_image = bool(with_image and i18n.LANGUAGE_IMAGE)
+    if show_image:
         _send_image(phone, i18n.LANGUAGE_IMAGE)
-    body = i18n.MENU_BODY_UNDER_IMAGE if with_image else i18n.MENU_BODY
+    body = i18n.MENU_BODY_UNDER_IMAGE if show_image else i18n.MENU_BODY
     rows = [(f"lang_{name.lower()}", name if nat == name else f"{name} / {nat}") for name, nat in i18n.MENU_LANGS]
     try:
         wa_id = whatsapp.send_list(phone, body, i18n.MENU_BUTTON, rows)
