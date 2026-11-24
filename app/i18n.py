@@ -23,7 +23,7 @@ PDF_BEFORE_LANGUAGE = ("🙏 Thank you! Please choose your language first, then 
                        "ದಯವಿಟ್ಟು ಮೊದಲು ಭಾಷೆ ಆಯ್ಕೆ ಮಾಡಿ, ನಂತರ PDF ಕಳುಹಿಸಿ · पहले भाषा चुनें, फिर PDF भेजें")
 
 # Images sent to a new client before the language menu (files in /static, served by the bot itself).
-INTRO_IMAGES = ["static/welcome2.jpg", "static/instructions.jpg"]
+INTRO_IMAGES = ["static/welcome2.jpg", "static/instructions2.jpg"]
 # "Choose Your Language" picture before the tap menu - switched off (set to "static/language.jpg" to bring it back).
 LANGUAGE_IMAGE = ""
 
