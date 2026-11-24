@@ -15,6 +15,7 @@ NATIVE = dict(MENU_LANGS)
 MENU_BODY = ("🌏 *Please choose your language*\n"
              "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಭಾಷೆ ಆಯ್ಕೆ ಮಾಡಿ · మీ భాషను ఎంచుకోండి · अपनी भाषा चुनें · உங்கள் மொழியைத் தேர்ந்தெடுக்கவும்\n\n"
              "Tap *Choose language* below, or reply with the language name.")
+MENU_BODY_UNDER_IMAGE = "👆 *Choose your language*"  # used right after the language image, so it reads as one block
 MENU_BUTTON = "Choose language"
 MENU_TEXT_FALLBACK = (MENU_BODY.split("\n\n")[0] + "\n\n"
                       + "\n".join(f"[{i}] {n}" + (f" / {nat}" if nat != n else "") for i, (n, nat) in enumerate(MENU_LANGS, 1))

@@ -217,10 +217,11 @@ def send_language_menu(phone: str, with_image: bool = False) -> None:
     """Tap-to-choose language list (falls back to a numbered text menu if WhatsApp rejects the list)."""
     if with_image:
         _send_image(phone, i18n.LANGUAGE_IMAGE)
+    body = i18n.MENU_BODY_UNDER_IMAGE if with_image else i18n.MENU_BODY
     rows = [(f"lang_{name.lower()}", name if nat == name else f"{name} / {nat}") for name, nat in i18n.MENU_LANGS]
     try:
-        wa_id = whatsapp.send_list(phone, i18n.MENU_BODY, i18n.MENU_BUTTON, rows)
-        store().log_message(phone, "assistant", i18n.MENU_BODY + "\n[language menu]", wa_id, "interactive")
+        wa_id = whatsapp.send_list(phone, body, i18n.MENU_BUTTON, rows)
+        store().log_message(phone, "assistant", body + "\n[language menu]", wa_id, "interactive")
     except Exception:
         log.exception("Language list failed for %s - sending the text menu", phone)
         reply(phone, i18n.MENU_TEXT_FALLBACK)
