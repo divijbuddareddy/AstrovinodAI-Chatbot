@@ -20,6 +20,12 @@ MENU_TEXT_FALLBACK = (MENU_BODY.split("\n\n")[0] + "\n\n"
                       + "\n".join(f"[{i}] {n}" + (f" / {nat}" if nat != n else "") for i, (n, nat) in enumerate(MENU_LANGS, 1))
                       + "\n\nReply with the number (e.g. 3) or the language name.")
 
+PDF_BEFORE_LANGUAGE = ("🙏 Thank you! Please choose your language first, then send your birth chart PDF again.\n"
+                       "ದಯವಿಟ್ಟು ಮೊದಲು ಭಾಷೆ ಆಯ್ಕೆ ಮಾಡಿ, ನಂತರ PDF ಕಳುಹಿಸಿ · पहले भाषा चुनें, फिर PDF भेजें")
+
+# Images sent to a new client before the language menu (files in /static, served by the bot itself).
+INTRO_IMAGES = ["static/welcome.jpg", "static/instructions.jpg"]
+
 TITLE = "🙏 *Welcome to ASTROVINOD AI*"
 
 T: dict[str, dict[str, str]] = {

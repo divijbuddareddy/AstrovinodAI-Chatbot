@@ -150,6 +150,9 @@ def handle(msg: dict) -> None:
 
             if result.reply:
                 reply(phone, result.reply)
+            if result.action == "intro":
+                send_intro(phone)
+                return
             if result.action == "language_menu":
                 send_language_menu(phone)
                 return
@@ -186,7 +189,23 @@ def handle(msg: dict) -> None:
                     log.exception("Could not send the resend request to %s", phone)
 
 
-# ---------------------------------------------------------------- language menu
+# ---------------------------------------------------------------- welcome images + language menu
+INTRO_GAP = 2.5  # seconds between messages, so WhatsApp shows them in order (images arrive slower than text)
+
+
+def send_intro(phone: str) -> None:
+    """New client (or RESET): welcome image, general instructions image, then the language menu."""
+    base = plans.public_url()
+    for path in i18n.INTRO_IMAGES:
+        try:
+            wa_id = whatsapp.send_image(phone, f"{base}/{path}")
+            store().log_message(phone, "assistant", f"[image: {path.rsplit('/', 1)[-1]}]", wa_id, "image")
+            time.sleep(INTRO_GAP)
+        except Exception:
+            log.exception("Intro image %s failed for %s", path, phone)  # never block the sign-up on an image
+    send_language_menu(phone)
+
+
 def send_language_menu(phone: str) -> None:
     """Tap-to-choose language list (falls back to a numbered text menu if WhatsApp rejects the list)."""
     rows = [(f"lang_{name.lower()}", name if nat == name else f"{name} / {nat}") for name, nat in i18n.MENU_LANGS]

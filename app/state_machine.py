@@ -142,9 +142,9 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
     msg = text.strip()
     is_media = msg_type in ("image", "document")
 
-    if not existing:  # new client: choose the language first, then the welcome and questions come in that language
+    if not existing:  # new client: welcome + instructions images, then the language menu
         c["conversation_state"] = "pick_language"
-        return StepResult(c, "", action="language_menu")
+        return StepResult(c, "", action="intro")
 
     state = c.get("conversation_state") or "onboarding"
     lang = c.get("language", "")
@@ -153,12 +153,14 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
         for k in PROFILE_FIELDS + CHART_FIELDS + ("consent", "language"):
             c[k] = ""
         c["conversation_state"] = "pick_language"
-        return StepResult(c, "", action="language_menu")
+        return StepResult(c, "", action="intro")
 
     if state in LEGACY_ONBOARDING:
         state = c["conversation_state"] = "onboarding"
 
     if state == "pick_language":  # first step of sign-up
+        if is_media:  # a Kundali sent before choosing the language: ask for the language first
+            return StepResult(c, i18n.PDF_BEFORE_LANGUAGE, action="language_menu")
         chosen = _pick(msg)
         if not chosen:
             return StepResult(c, "", action="language_menu")

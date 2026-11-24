@@ -127,6 +127,22 @@ def send_text(to: str, body: str) -> str:
     return (resp.json().get("messages") or [{}])[0].get("id", "")
 
 
+def send_image(to: str, link: str, caption: str = "") -> str:
+    """Send an image by public HTTPS link (JPG/PNG, max 5 MB); returns the WhatsApp message id."""
+    image = {"link": link}
+    if caption:
+        image["caption"] = caption[:1024]
+    resp = _with_retries(lambda: requests.post(
+        f"{GRAPH}/{config.WHATSAPP_PHONE_NUMBER_ID}/messages",
+        headers={**_HEADERS, "Content-Type": "application/json"},
+        json={"messaging_product": "whatsapp", "recipient_type": "individual", "to": to, "type": "image", "image": image},
+        timeout=30,
+    ))
+    if resp.status_code >= 400:
+        raise RuntimeError(f"WhatsApp image send failed ({resp.status_code}): {resp.text}")
+    return (resp.json().get("messages") or [{}])[0].get("id", "")
+
+
 def send_list(to: str, body: str, button: str, rows: list[tuple[str, str]], section: str = "Languages") -> str:
     """Send a tap-to-choose list (WhatsApp interactive list, max 10 rows). rows = [(id, title<=24 chars)].
     The client's tap comes back as an 'interactive' message whose text is the row title."""
