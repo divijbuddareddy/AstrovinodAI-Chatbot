@@ -224,7 +224,7 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
                 c["language"] = chosen
                 return StepResult(c, i18n.t("lang_changed", chosen, name=i18n.native_name(chosen)))
             c["conversation_state"] = "change_language"
-            return StepResult(c, "", action="language_menu")
+            return StepResult(c, "", action="language_menu_image")
         if HOROSCOPE_CMD.match(msg):
             c["consent"] = "yes"
             return StepResult(c, i18n.t("generating", lang), action="generate_horoscope")

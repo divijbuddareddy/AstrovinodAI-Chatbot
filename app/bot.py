@@ -153,8 +153,8 @@ def handle(msg: dict) -> None:
             if result.action == "intro":
                 send_intro(phone)
                 return
-            if result.action == "language_menu":
-                send_language_menu(phone)
+            if result.action in ("language_menu", "language_menu_image"):
+                send_language_menu(phone, with_image=result.action == "language_menu_image")
                 return
 
             actions = {"onboard": (onboard, (msg,)), "finish_onboarding": (finish_onboarding, ()),
@@ -193,21 +193,26 @@ def handle(msg: dict) -> None:
 INTRO_GAP = 2.5  # seconds between messages, so WhatsApp shows them in order (images arrive slower than text)
 
 
+def _send_image(phone: str, path: str) -> None:
+    try:
+        wa_id = whatsapp.send_image(phone, f"{plans.public_url()}/{path}")
+        store().log_message(phone, "assistant", f"[image: {path.rsplit('/', 1)[-1]}]", wa_id, "image")
+        time.sleep(INTRO_GAP)
+    except Exception:
+        log.exception("Image %s failed for %s", path, phone)  # never block the sign-up on an image
+
+
 def send_intro(phone: str) -> None:
-    """New client (or RESET): welcome image, general instructions image, then the language menu."""
-    base = plans.public_url()
+    """New client (or RESET): welcome image, general instructions image, language image, then the tap menu."""
     for path in i18n.INTRO_IMAGES:
-        try:
-            wa_id = whatsapp.send_image(phone, f"{base}/{path}")
-            store().log_message(phone, "assistant", f"[image: {path.rsplit('/', 1)[-1]}]", wa_id, "image")
-            time.sleep(INTRO_GAP)
-        except Exception:
-            log.exception("Intro image %s failed for %s", path, phone)  # never block the sign-up on an image
-    send_language_menu(phone)
+        _send_image(phone, path)
+    send_language_menu(phone, with_image=True)
 
 
-def send_language_menu(phone: str) -> None:
+def send_language_menu(phone: str, with_image: bool = False) -> None:
     """Tap-to-choose language list (falls back to a numbered text menu if WhatsApp rejects the list)."""
+    if with_image:
+        _send_image(phone, i18n.LANGUAGE_IMAGE)
     rows = [(f"lang_{name.lower()}", name if nat == name else f"{name} / {nat}") for name, nat in i18n.MENU_LANGS]
     try:
         wa_id = whatsapp.send_list(phone, i18n.MENU_BODY, i18n.MENU_BUTTON, rows)
