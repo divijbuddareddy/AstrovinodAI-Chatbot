@@ -10,7 +10,7 @@ import re
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from . import ai, astrology, intents, plans, vedic, whatsapp
+from . import ai, astrology, i18n, intents, plans, vedic, whatsapp
 from .sheets import open_store
 from . import state_machine as sm
 from .state_machine import step
@@ -111,6 +111,10 @@ def handle(msg: dict) -> None:
             if s.message_seen(mid):
                 return
 
+            if msg["type"] == "reaction":
+                handle_reaction(msg)
+                return
+
             if not msg["text"]:
                 s.log_message(phone, "user", f"[unsupported {msg['type']} message]", mid, msg["type"])
                 reply(phone, "🙏 I can read text messages, images and PDF documents. Please send your question as text.")
@@ -146,6 +150,9 @@ def handle(msg: dict) -> None:
 
             if result.reply:
                 reply(phone, result.reply)
+            if result.action == "language_menu":
+                send_language_menu(phone)
+                return
 
             actions = {"onboard": (onboard, (msg,)), "finish_onboarding": (finish_onboarding, ()),
                        "generate_horoscope": (generate_horoscope, ()), "answer_question": (answer, (msg,))}
@@ -177,6 +184,90 @@ def handle(msg: dict) -> None:
                     reply(phone, RESEND_MSG)
                 except Exception:
                     log.exception("Could not send the resend request to %s", phone)
+
+
+# ---------------------------------------------------------------- language menu
+def send_language_menu(phone: str) -> None:
+    """Tap-to-choose language list (falls back to a numbered text menu if WhatsApp rejects the list)."""
+    rows = [(f"lang_{name.lower()}", name if nat == name else f"{name} / {nat}") for name, nat in i18n.MENU_LANGS]
+    try:
+        wa_id = whatsapp.send_list(phone, i18n.MENU_BODY, i18n.MENU_BUTTON, rows)
+        store().log_message(phone, "assistant", i18n.MENU_BODY + "\n[language menu]", wa_id, "interactive")
+    except Exception:
+        log.exception("Language list failed for %s - sending the text menu", phone)
+        reply(phone, i18n.MENU_TEXT_FALLBACK)
+
+
+# ---------------------------------------------------------------- emoji reactions
+# A client can long-press one of our messages and react with an emoji. Positive reactions get a short thank-you
+# (no AI, not counted as a chat); worried/sad ones get a short caring reply from the AI about that message
+# (counted as one chat); anything else - and removing a reaction - is ignored quietly.
+POSITIVE_REACTIONS = set("👍❤🙏😊🥰😍👏🙌💯✅🔥😀😃😄😁🤩💙💚💛🧡💜🤍♥👌🤗😇☺🌹💐⭐🌟✨🫶")
+CONCERN_REACTIONS = set("😟😢😭😥😰😨😞😔😩😫💔🙁☹😓😣😖🥺😧😦😿😕")
+THANKS_GAP = 600  # seconds: at most one thank-you per client every 10 minutes
+_last_thanks: dict[str, float] = {}
+
+THANK_YOU = {
+    "english": "Thank you", "hindi": "धन्यवाद", "hinglish": "Dhanyavaad", "kannada": "ಧನ್ಯವಾದಗಳು",
+    "telugu": "ధన్యవాదాలు", "tamil": "நன்றி", "malayalam": "നന്ദി", "marathi": "धन्यवाद", "bengali": "ধন্যবাদ",
+    "gujarati": "આભાર", "punjabi": "ਧੰਨਵਾਦ", "odia": "ଧନ୍ୟବାଦ", "urdu": "شکریہ", "assamese": "ধন্যবাদ",
+    "nepali": "धन्यवाद", "sanskrit": "धन्यवादः", "konkani": "देव बरें करूं",
+}
+
+
+def _base_emoji(emoji: str) -> str:
+    """Strip skin tones / variation selectors so 👍🏽 and ❤️ match 👍 and ❤."""
+    return "".join(ch for ch in emoji if not (0x1F3FB <= ord(ch) <= 0x1F3FF or ord(ch) in (0xFE0F, 0x200D)))
+
+
+def handle_reaction(msg: dict) -> None:
+    s = store()
+    phone, emoji = msg["phone"], (msg.get("emoji") or "").strip()
+    if not emoji:  # reaction removed
+        return
+    s.log_message(phone, "user", f"[reaction {emoji}]", msg["message_id"], "reaction")
+    customer = s.get_customer(phone)
+    if not customer or customer.get("conversation_state") != "ready":
+        return  # don't interrupt registration
+    base = _base_emoji(emoji)
+    first = _first(customer)
+
+    if base and all(ch in POSITIVE_REACTIONS for ch in base):
+        now = time.time()
+        if now - _last_thanks.get(phone, 0) < THANKS_GAP:
+            return
+        _last_thanks[phone] = now
+        word = THANK_YOU.get((customer.get("language") or "").strip().lower(), "Thank you")
+        reply(phone, f"🙏 {word}{', ' + first + ' ji' if first else ''}!")
+        return
+
+    if not (base and any(ch in CONCERN_REACTIONS for ch in base)):
+        return  # 😂 🤔 😮 etc.: nothing to say
+
+    # Worried / sad: a short caring answer about the message they reacted to (uses the AI -> counts as a chat).
+    blocked = plans.limit_message(customer)
+    if blocked:
+        reply(phone, blocked)
+        return
+    reacted = next((r["message"] for r in s.recent_history(phone, limit=40)
+                    if r.get("message_id") == msg.get("reacted_to")), "")
+    note = (f"[The client reacted with {emoji} to this message of yours: \"{reacted[:700]}\"]" if reacted
+            else f"[The client reacted with {emoji} to one of your recent messages.]")
+    question = (note + "\nThey seem worried or sad about it. Reply briefly (2-5 lines): acknowledge the feeling, reassure "
+                "them honestly about that specific point using their chart (difficult phases pass, what helps), and "
+                "invite them to tell you what is worrying them.")
+    _tls.sent = False
+    try:
+        _with_retries(answer, customer, {**msg, "text": question, "media_id": ""})
+    except Exception:
+        log.exception("Reaction reply failed for %s", phone)
+        return
+    try:
+        note = plans.use_chat(phone)
+        if note:
+            reply(phone, note)
+    except Exception:
+        log.exception("Could not count the chat for %s", phone)
 
 
 def ensure_chart(customer: dict, force: bool = False) -> dict:
@@ -238,6 +329,7 @@ def onboard(customer: dict, msg: dict) -> None:
     "14th May 1992", "evening 6:30", a Kundali PDF) is read by Claude. Then the next missing detail is asked."""
     phone = customer["phone_number"]
     current = sm.next_question(customer)
+    lang = customer.get("language", "")
     text = msg["text"].strip()
     ask_ampm = ""
     place_error = False
@@ -250,17 +342,17 @@ def onboard(customer: dict, msg: dict) -> None:
         except Exception:
             log.exception("Media download failed for %s", msg["media_id"])
         if mime not in ("application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif"):
-            reply(phone, "🙏 I can read a Kundali as a *PDF* or a clear photo. Or simply answer:\n\n" + sm.QUESTIONS[current or "full_name"])
+            reply(phone, i18n.t("kundli_format", lang) + "\n\n" + i18n.question(current or "full_name", lang))
             return
         if not getattr(_tls, "attempt", 0):  # don't repeat it on a quiet retry
-            reply(phone, "📎 Thank you! Reading your Kundali now…", progress=True)
+            reply(phone, i18n.t("kundli_reading", lang), progress=True)
         caption = "" if text.startswith("Please analyse") else text
         details = ai.extract_birth_details(customer, caption, media, mime, sm.QUESTIONS.get(current, ""))
         _merge(customer, details)
         if details.is_birth_chart and details.chart_notes:
             customer["kundli_pdf_notes"] = details.chart_notes[:20000]
         elif not details.is_birth_chart:
-            reply(phone, "🙏 I couldn't find birth details in that file, so let's do it step by step.")
+            reply(phone, i18n.t("kundli_none", lang))
     else:
         handled = False
         if current == "full_name":
@@ -302,18 +394,15 @@ def onboard(customer: dict, msg: dict) -> None:
         customer["conversation_state"] = "onboarding"
         store().upsert_customer(customer)
         if ask_ampm:
-            reply(phone, f"Is your birth time *{ask_ampm}* in the morning or evening?\nPlease reply like *{ask_ampm} AM* or *{ask_ampm} PM*.")
+            reply(phone, i18n.t("ampm", lang, t=ask_ampm))
         elif place_error:
-            reply(phone, "🙏 I couldn't find that place on the map. Please send it as *City, State, Country*\n_Example: Mysuru, Karnataka, India_")
+            reply(phone, i18n.t("place_error", lang))
         elif nxt == current:  # the answer couldn't be understood -> ask the same question again
-            hints = {"full_name": "Please type your full name.",
-                     "dob": "Please send your date of birth like *14/05/1992*.",
-                     "birth_time": "Please send your time of birth like *06:35 AM* or *06:35 PM*.",
-                     "birth_place": "Please send your place of birth like *Mysuru, Karnataka, India*."}
-            reply(phone, "🙏 " + hints[nxt])
+            reply(phone, i18n.hint(nxt, lang))
         else:
-            thanks = f"Thank you, {_first(customer)} ji! 🙏\n\n" if current == "full_name" and _first(customer) else "Thank you! 🙏\n\n"
-            reply(phone, thanks + sm.QUESTIONS[nxt])
+            thanks = (i18n.t("thanks_name", lang, first=_first(customer)) if current == "full_name" and _first(customer)
+                      else i18n.t("thanks", lang))
+            reply(phone, thanks + "\n\n" + i18n.question(nxt, lang))
         return
 
     # All four details are in: let the client check the place we found before making the chart.
@@ -328,13 +417,14 @@ def finish_onboarding(customer: dict) -> None:
     customer["consent"] = "yes"
     customer["conversation_state"] = "ready"
     store().upsert_customer(customer)
+    lang = customer.get("language", "")
+    tr = lambda key, **kw: i18n.t(key, lang, **kw)  # noqa: E731
     reply(phone, (
-        f"🙏 Thank you, {_first(customer)} ji! Your birth profile:\n\n"
-        f"• *Name:* {customer['full_name']}\n• *Date of Birth:* {_fmt_dob(customer['dob'])}\n"
-        f"• *Time of Birth:* {_fmt_time(customer['birth_time'])}\n"
-        f"• *Place of Birth:* {customer.get('resolved_place') or customer['birth_place']}\n\n"
-        "🔭 Generating your Vedic birth chart and personalised horoscope. This takes 2-3 minutes…\n"
-        "_(Reply RESET anytime to correct your details.)_"), progress=True)
+        f"{tr('profile_head', first=_first(customer))}\n\n"
+        f"• *{tr('l_name')}:* {customer['full_name']}\n• *{tr('l_dob')}:* {_fmt_dob(customer['dob'])}\n"
+        f"• *{tr('l_tob')}:* {_fmt_time(customer['birth_time'])}\n"
+        f"• *{tr('l_pob')}:* {customer.get('resolved_place') or customer['birth_place']}\n\n"
+        f"{tr('generating')}\n{tr('reset_hint')}"), progress=True)
     _with_retries(generate_horoscope, customer)
 
 
@@ -370,7 +460,7 @@ def generate_horoscope(customer: dict) -> None:
     except astrology.BirthplaceNotFound:
         customer.update(conversation_state="onboarding", birth_place="", latitude="", longitude="", resolved_place="")
         store().upsert_customer(customer)
-        reply(phone, "🙏 I couldn't find your birthplace on the map. " + sm.QUESTIONS["birth_place"])
+        reply(phone, i18n.t("place_not_found", customer.get("language")) + i18n.question("birth_place", customer.get("language")))
         return
     report = ai.horoscope_report(customer, chart, now_context(customer, chart))
     reply(phone, report)
@@ -384,7 +474,7 @@ def answer(customer: dict, msg: dict) -> None:
     except astrology.BirthplaceNotFound:
         customer.update(conversation_state="onboarding", birth_place="", latitude="", longitude="", resolved_place="")
         s.upsert_customer(customer)
-        reply(phone, "Before I answer, I need to locate your birthplace. Please send it as *City, Country* (e.g. Mysuru, India).")
+        reply(phone, i18n.t("place_not_found", customer.get("language")) + i18n.question("birth_place", customer.get("language")))
         return
     now_ctx = now_context(customer, chart)
 
@@ -393,7 +483,7 @@ def answer(customer: dict, msg: dict) -> None:
     if history and history[-1].get("message_id") == msg["message_id"]:
         history = history[:-1]
 
-    intent = None if msg["media_id"] else intents.detect(msg["text"], datetime.now(_tz(customer)).date())
+    intent = None if (msg["media_id"] or msg.get("type") == "reaction") else intents.detect(msg["text"], datetime.now(_tz(customer)).date())
     if intent:
         lat, lon, tz_name = float(customer["latitude"]), float(customer["longitude"]), customer["timezone"]
         period = vedic.period_transits(chart, intent.start, intent.end, tz_name)

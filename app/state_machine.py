@@ -14,16 +14,22 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 
+from . import i18n
+
 YES = re.compile(r"^(yes|y|yeah|yep|haan|ha|han|ji|ok|okay|sure|i have|i do|yes i have( it)?)[.! ]*$", re.I)
 NO = re.compile(r"^(no|n|nahi|nope|no i don'?t|i don'?t( have( it)?)?|not now|later|cancel)[.! ]*$", re.I)
-GREETING = re.compile(r"^(hi+|hello|hey|start|namaste|namaskar|hii+|good (morning|afternoon|evening))[.! ]*$", re.I)
+GREETING = re.compile(r"^(hi+|hello|hey|hai|hlo|helo|start|namaste|namaskar|namaskara|hii+|good (morning|afternoon|evening)|"
+                      r"ನಮಸ್ಕಾರ|ನಮಸ್ತೆ|నమస్కారం|నమస్తే|नमस्ते|नमस्कार|வணக்கம்|നമസ്കാരം|নমস্কার|નમસ્તે|ਸਤ ਸ੍ਰੀ ਅਕਾਲ)[.!🙏 ]*$", re.I)
 HOROSCOPE_CMD = re.compile(
     r"^(please\s+)?((generate|create|make|send|show|get)\s+)?(me\s+)?(my\s+)?(full\s+)?"
     r"(horoscope|kundli|kundali|birth\s*chart|chart analysis)(\s+report)?(\s+please)?[.! ]*$", re.I)
 CONFIRM_YES = re.compile(
-    r"^(yes|y|ya|yah|yeah|yep|yup|yes sir|ok|okay|okk|k|correct|right|perfect|sahi|haan|han|ha|ji|ji haan|s|👍)"
-    r"( (it is|it'?s|its|that'?s|is|correct|right|sahi|hai|ji|haan|ha|sir|madam|guruji))*[.!👍🙏 ]*$", re.I)
-CONFIRM_NO = re.compile(r"^(no|n|nope|nahi|nahin|na|wrong|incorrect|not correct|galat|change( it)?|not this)[.! ]*$", re.I)
+    r"^(yes|y|ya|yah|yeah|yep|yup|yes sir|ok|okay|okk|k|correct|right|perfect|sahi|haan|han|ha|ji|ji haan|s|👍|houdu|avunu|"
+    r"ಹೌದು|ಸರಿ|అవును|సరే|हाँ|हां|हा|हो|होय|जी|सही|ஆம்|சரி|അതെ|ശരി|হ্যাঁ|হ্যা|ঠিক|હા|હાં|બરાબર|ਹਾਂ|ਹਾਂਜੀ|ਸਹੀ)"
+    r"( (it is|it'?s|its|that'?s|is|correct|right|sahi|hai|ji|haan|ha|sir|madam|guruji|"
+    r"ಸರಿ|ಹೌದು|ಸರ್|సరే|అవును|సార్|सही|है|जी|சரி|ஆம்|ശരി|ঠিক|আছে|બરાબર|છે|ਸਹੀ|ਜੀ))*[.!👍🙏 ]*$", re.I)
+CONFIRM_NO = re.compile(r"^(no|n|nope|nahi|nahin|na|wrong|incorrect|not correct|galat|change( it)?|not this|illa|ledu|"
+                        r"ಇಲ್ಲ|ಬೇಡ|ತಪ್ಪು|కాదు|లేదు|తప్పు|नहीं|नही|गलत|இல்லை|தவறு|അല്ല|ഇല്ല|തെറ്റ്|नाही|चूक|না|ভুল|ના|ખોટું|ਨਹੀਂ|ਗਲਤ)[.! ]*$", re.I)
 RESET_CMD = re.compile(r"^(reset|restart|change (my )?details|update (my )?details|new profile)[.! ]*$", re.I)
 
 WELCOME = """🙏 *Welcome to ASTROVINOD AI*
@@ -102,8 +108,7 @@ LANGUAGE_CMD = re.compile(r"^\s*(change\s+(my\s+)?)?(language|bhasha|bhasa)(\s+t
 
 def place_confirmation(c: dict) -> str:
     place = c.get("resolved_place") or c.get("birth_place", "")
-    return (f"📍 I found your place of birth as:\n*{place}*\n\n"
-            "Is this correct? Reply *YES*, or send the correct place (City, State, Country).")
+    return i18n.t("place_confirm", c.get("language"), place=place)
 
 
 PROFILE_FIELDS = ("full_name", "dob", "birth_time", "birth_place")
@@ -124,6 +129,11 @@ def has_details(c: dict) -> bool:
     return all(c.get(k) for k in PROFILE_FIELDS)
 
 
+def _pick(msg: str) -> str:
+    """Language from a menu tap/number ('3', 'Kannada / ಕನ್ನಡ') or a typed name; '' if not recognised."""
+    return i18n.menu_choice(msg) or parse_language(msg)
+
+
 def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_type: str) -> StepResult:
     c = dict(existing or {})
     c["phone_number"] = phone
@@ -132,37 +142,43 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
     msg = text.strip()
     is_media = msg_type in ("image", "document")
 
-    if not existing:
-        c["conversation_state"] = "onboarding"
-        # A Kundali file as the very first message -> read it straight away.
-        if is_media:
-            return StepResult(c, "", action="onboard")
-        return StepResult(c, WELCOME)
+    if not existing:  # new client: choose the language first, then the welcome and questions come in that language
+        c["conversation_state"] = "pick_language"
+        return StepResult(c, "", action="language_menu")
 
     state = c.get("conversation_state") or "onboarding"
+    lang = c.get("language", "")
 
     if RESET_CMD.match(msg):
         for k in PROFILE_FIELDS + CHART_FIELDS + ("consent", "language"):
             c[k] = ""
-        c["conversation_state"] = "onboarding"
-        return StepResult(c, "Sure, let's set up your birth profile again. 🙏\n\n" + QUESTIONS["full_name"])
+        c["conversation_state"] = "pick_language"
+        return StepResult(c, "", action="language_menu")
 
     if state in LEGACY_ONBOARDING:
         state = c["conversation_state"] = "onboarding"
+
+    if state == "pick_language":  # first step of sign-up
+        chosen = _pick(msg)
+        if not chosen:
+            return StepResult(c, "", action="language_menu")
+        c["language"], c["conversation_state"] = chosen, "onboarding"
+        return StepResult(c, i18n.welcome(chosen))
 
     if state == "onboarding":
         if is_media:
             return StepResult(c, "", action="onboard")
         if not msg or GREETING.match(msg):
             nxt = next_question(c)
-            return StepResult(c, WELCOME if nxt == "full_name" else "🙏 Let's continue.\n\n" + QUESTIONS[nxt])
+            return StepResult(c, i18n.welcome(lang) if nxt == "full_name"
+                              else i18n.t("continue", lang) + "\n\n" + i18n.question(nxt, lang))
         return StepResult(c, "", action="onboard")
 
     if state == "confirm_place":  # all details collected; client checks the place we found on the map
         if CONFIRM_YES.match(msg):
-            if not c.get("language"):  # ask the language once, before the horoscope is written
+            if not c.get("language"):  # clients who signed up before the language-first menu
                 c["conversation_state"] = "choose_language"
-                return StepResult(c, LANGUAGE_Q)
+                return StepResult(c, "", action="language_menu")
             return StepResult(c, "", action="finish_onboarding")
         if is_media or not msg or GREETING.match(msg):
             return StepResult(c, place_confirmation(c))
@@ -170,56 +186,52 @@ def step(existing: dict | None, phone: str, profile_name: str, text: str, msg_ty
             c[k] = ""
         c["conversation_state"] = "onboarding"
         if CONFIRM_NO.match(msg):
-            return StepResult(c, "No problem. 🙏\n\n" + QUESTIONS["birth_place"])
+            return StepResult(c, i18n.t("no_problem", lang) + "\n\n" + i18n.question("birth_place", lang))
         return StepResult(c, "", action="onboard")  # the message is the corrected place
 
-    if state == "choose_language":  # birthplace confirmed; language chosen -> make the chart and horoscope
-        lang = parse_language(msg)
-        if not lang:
-            return StepResult(c, LANGUAGE_RETRY)
-        c["language"] = lang
+    if state == "choose_language":  # (older flow) birthplace confirmed; language chosen -> chart and horoscope
+        chosen = _pick(msg)
+        if not chosen:
+            return StepResult(c, "", action="language_menu")
+        c["language"] = chosen
         return StepResult(c, "", action="finish_onboarding")
 
     if state == "change_language":  # a ready client asked to change the language
-        lang = parse_language(msg)
-        if not lang:
-            return StepResult(c, LANGUAGE_RETRY)
-        c["language"], c["conversation_state"] = lang, "ready"
-        return StepResult(c, f"✅ Done! From now on I will reply in *{lang}*. 🙏")
+        chosen = _pick(msg)
+        if not chosen:
+            return StepResult(c, "", action="language_menu")
+        c["language"], c["conversation_state"] = chosen, "ready"
+        return StepResult(c, i18n.t("lang_changed", chosen, name=i18n.native_name(chosen)))
 
     if state == "confirm_horoscope":  # legacy n8n state
         if YES.match(msg) or HOROSCOPE_CMD.match(msg):
             c["consent"] = "yes"
             c["conversation_state"] = "ready"
-            return StepResult(c, "🔭 Generating your Vedic birth chart and preparing your birth profile. This takes 2-3 minutes…",
-                              action="generate_horoscope")
+            return StepResult(c, i18n.t("generating", lang), action="generate_horoscope")
         c["conversation_state"] = "ready"
         state = "ready"
 
     if state == "ready":
         if not has_details(c):
             c["conversation_state"] = "onboarding"
-            return StepResult(c, WELCOME)
+            return StepResult(c, i18n.welcome(lang))
         m = LANGUAGE_CMD.match(msg)
-        lang = parse_language(m.group("rest")) if m else ""
-        if m and (lang or not m.group("rest").strip(" .!?")):  # "LANGUAGE", "change language", "language hindi"
-            if lang:
-                c["language"] = lang
-                return StepResult(c, f"✅ Done! From now on I will reply in *{lang}*. 🙏")
+        chosen = _pick(m.group("rest")) if m else ""
+        if m and (chosen or not m.group("rest").strip(" .!?")):  # "LANGUAGE", "change language", "language hindi"
+            if chosen:
+                c["language"] = chosen
+                return StepResult(c, i18n.t("lang_changed", chosen, name=i18n.native_name(chosen)))
             c["conversation_state"] = "change_language"
-            return StepResult(c, LANGUAGE_Q)
+            return StepResult(c, "", action="language_menu")
         if HOROSCOPE_CMD.match(msg):
             c["consent"] = "yes"
-            return StepResult(c, "🔭 Preparing your complete birth chart analysis. This takes 2-3 minutes…",
-                              action="generate_horoscope")
+            return StepResult(c, i18n.t("generating", lang), action="generate_horoscope")
         if GREETING.match(msg):
-            return StepResult(c, f"🙏 Welcome back, {c.get('full_name', '').split(' ')[0]} ji!\n\n"
-                                 "Ask me any astrology question, ask for your *daily*, *weekly* or *monthly* guidance, "
-                                 "or share a chart image/PDF.")
+            return StepResult(c, i18n.t("welcome_back", lang, first=c.get("full_name", "").split(" ")[0]))
         return StepResult(c, "", action="answer_question")
 
-    c["conversation_state"] = "onboarding"
-    return StepResult(c, WELCOME)
+    c["conversation_state"] = "pick_language"
+    return StepResult(c, "", action="language_menu")
 
 
 def valid_dob(iso: str) -> bool:

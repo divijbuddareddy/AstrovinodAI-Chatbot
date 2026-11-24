@@ -37,8 +37,12 @@ def extract_messages(payload: dict) -> list[dict]:
                 contact = next((c for c in contacts if c.get("wa_id") == msg.get("from")), contacts[0] if contacts else {})
                 mtype = msg.get("type", "")
                 text, media_id, mime, filename = "", "", "", ""
+                emoji, reacted_to = "", ""
 
-                if mtype == "text":
+                if mtype == "reaction":  # client long-pressed one of our messages and tapped an emoji
+                    react = msg.get("reaction", {}) or {}
+                    emoji, reacted_to = react.get("emoji", "") or "", react.get("message_id", "") or ""
+                elif mtype == "text":
                     text = msg.get("text", {}).get("body", "")
                 elif mtype == "button":
                     text = msg.get("button", {}).get("text", "")
@@ -67,6 +71,8 @@ def extract_messages(payload: dict) -> list[dict]:
                     "media_id": media_id,
                     "mime_type": mime,
                     "filename": filename,
+                    "emoji": emoji,            # reactions only ("" when a reaction is removed)
+                    "reacted_to": reacted_to,  # reactions only: id of our message they reacted to
                 })
     return out
 
@@ -118,6 +124,33 @@ def send_text(to: str, body: str) -> str:
     ))
     if resp.status_code >= 400:
         raise RuntimeError(f"WhatsApp send failed ({resp.status_code}): {resp.text}")
+    return (resp.json().get("messages") or [{}])[0].get("id", "")
+
+
+def send_list(to: str, body: str, button: str, rows: list[tuple[str, str]], section: str = "Languages") -> str:
+    """Send a tap-to-choose list (WhatsApp interactive list, max 10 rows). rows = [(id, title<=24 chars)].
+    The client's tap comes back as an 'interactive' message whose text is the row title."""
+    resp = _with_retries(lambda: requests.post(
+        f"{GRAPH}/{config.WHATSAPP_PHONE_NUMBER_ID}/messages",
+        headers={**_HEADERS, "Content-Type": "application/json"},
+        json={
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "body": {"text": body[:1024]},
+                "action": {"button": button[:20], "sections": [{
+                    "title": section[:24],
+                    "rows": [{"id": rid[:200], "title": title[:24]} for rid, title in rows[:10]],
+                }]},
+            },
+        },
+        timeout=30,
+    ))
+    if resp.status_code >= 400:
+        raise RuntimeError(f"WhatsApp list send failed ({resp.status_code}): {resp.text}")
     return (resp.json().get("messages") or [{}])[0].get("id", "")
 
 
