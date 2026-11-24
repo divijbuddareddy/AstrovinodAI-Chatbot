@@ -193,11 +193,15 @@ def handle(msg: dict) -> None:
 INTRO_GAP = 2.5  # seconds between messages, so WhatsApp shows them in order (images arrive slower than text)
 
 
+# Seconds to wait AFTER each image, so the client can look at it before the next one arrives.
+IMAGE_PAUSE = {"static/welcome.jpg": 6, "static/instructions.jpg": 10, "static/language.jpg": 3}
+
+
 def _send_image(phone: str, path: str) -> None:
     try:
         wa_id = whatsapp.send_image(phone, f"{plans.public_url()}/{path}")
         store().log_message(phone, "assistant", f"[image: {path.rsplit('/', 1)[-1]}]", wa_id, "image")
-        time.sleep(INTRO_GAP)
+        time.sleep(IMAGE_PAUSE.get(path, INTRO_GAP))
     except Exception:
         log.exception("Image %s failed for %s", path, phone)  # never block the sign-up on an image
 
