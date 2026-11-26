@@ -37,7 +37,7 @@ def extract_messages(payload: dict) -> list[dict]:
                 contact = next((c for c in contacts if c.get("wa_id") == msg.get("from")), contacts[0] if contacts else {})
                 mtype = msg.get("type", "")
                 text, media_id, mime, filename = "", "", "", ""
-                emoji, reacted_to = "", ""
+                emoji, reacted_to, reply_id = "", "", ""
 
                 if mtype == "reaction":  # client long-pressed one of our messages and tapped an emoji
                     react = msg.get("reaction", {}) or {}
@@ -48,7 +48,8 @@ def extract_messages(payload: dict) -> list[dict]:
                     text = msg.get("button", {}).get("text", "")
                 elif mtype == "interactive":
                     inter = msg.get("interactive", {})
-                    text = (inter.get("button_reply") or {}).get("title") or (inter.get("list_reply") or {}).get("title") or ""
+                    chosen = inter.get("button_reply") or inter.get("list_reply") or {}
+                    text, reply_id = chosen.get("title") or "", chosen.get("id") or ""
                 elif mtype == "image":
                     img = msg.get("image", {})
                     media_id, mime = img.get("id", ""), img.get("mime_type", "image/jpeg")
@@ -73,6 +74,8 @@ def extract_messages(payload: dict) -> list[dict]:
                     "filename": filename,
                     "emoji": emoji,            # reactions only ("" when a reaction is removed)
                     "reacted_to": reacted_to,  # reactions only: id of our message they reacted to
+                    "reply_id": reply_id,
+                    "context_id": (msg.get("context") or {}).get("id", ""),
                 })
     return out
 

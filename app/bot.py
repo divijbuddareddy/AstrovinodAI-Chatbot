@@ -138,6 +138,9 @@ def handle(msg: dict) -> None:
                     else:
                         send_payment_link(phone, cmd)
                     return
+                if msg.get("reply_id", "").startswith("q_") and _questions_menu_used(s, phone, mid, msg.get("context_id", "")):
+                    reply(phone, i18n.t("menu_already_used", existing.get("language")))
+                    return
                 if i18n.is_type_own_question(msg["text"]):
                     reply(phone, i18n.t("type_own_question", existing.get("language")))
                     return
@@ -294,6 +297,20 @@ def send_questions_menu(phone: str) -> None:
     except Exception:
         log.exception("Questions list failed for %s - sending the text menu", phone)
         reply(phone, i18n.QUESTION_MENU_TEXT_FALLBACK)
+
+
+def _questions_menu_used(s, phone: str, current_mid: str, context_id: str) -> bool:
+    """True if the latest questions menu was already answered once (or the user tapped an older menu)."""
+    rows = [r for r in s.recent_history(phone, limit=50) if r.get("message_id") != current_mid]
+    menu_idx = next((i for i in range(len(rows) - 1, -1, -1)
+                     if rows[i].get("role") == "assistant" and "[questions menu]" in rows[i].get("message", "")), None)
+    if menu_idx is None:
+        return True
+    menu_mid = rows[menu_idx].get("message_id", "")
+    if context_id and menu_mid and context_id != menu_mid:
+        return True
+    return any(r.get("role") == "user" and r.get("message_type") == "interactive"
+               and r.get("message") in i18n.QUESTION_MENU_TITLES for r in rows[menu_idx + 1:])
 
 
 def _schedule_questions_menu(phone: str, expected_mid: str, delay: int = QUESTION_MENU_DELAY) -> None:
