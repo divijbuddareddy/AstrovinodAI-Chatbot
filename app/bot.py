@@ -128,11 +128,14 @@ def handle(msg: dict) -> None:
             existing = s.get_customer(phone)
             was_ready = (existing or {}).get("conversation_state") == "ready"
 
-            # Subscription commands (PLANS / GOLD / PLATINUM / VIP) - never counted as chats.
+            # Subscription commands (PLANS / STANDARD / PREMIUM / VIP) - never counted as chats.
             if was_ready and not msg["media_id"]:
-                plan_reply = plans.command_reply(existing, msg["text"])
-                if plan_reply:
-                    reply(phone, plan_reply)
+                cmd = plans.handle_command(existing, msg["text"])
+                if cmd:
+                    if cmd["kind"] == "plans":
+                        send_plans_prompt(phone, cmd["body"], cmd["fallback"])
+                    else:
+                        send_payment_link(phone, cmd)
                     return
 
             result = step(existing, phone, msg["profile_name"], msg["text"], msg["type"])
@@ -140,12 +143,12 @@ def handle(msg: dict) -> None:
             customer["last_message_id"] = mid
             s.upsert_customer(customer)
 
-            # A question after setup counts as one chat; when the plan's chats are used up, show the plans instead.
+            # A question after setup counts as one chat; when the plan's chats are used up, show the plans image instead.
             counted = result.action == "answer_question" or (result.action == "generate_horoscope" and was_ready)
             if counted:
-                blocked = plans.limit_message(customer)
-                if blocked:
-                    reply(phone, blocked)
+                caption, fallback = plans.limit_prompt(customer)
+                if caption:
+                    send_plans_prompt(phone, caption, fallback)
                     return
 
             if result.reply:
@@ -175,8 +178,10 @@ def handle(msg: dict) -> None:
                     raise
                 if counted:
                     try:
-                        note = plans.use_chat(phone)
-                        if note:
+                        note, exhausted = plans.use_chat_status(phone)
+                        if exhausted:
+                            send_plans_prompt(phone, note, f"{note}\n\n{plans.plans_menu()}")
+                        elif note:
                             reply(phone, note)
                     except Exception:
                         log.exception("Could not count the chat for %s", phone)
@@ -204,6 +209,36 @@ def _send_image(phone: str, path: str) -> None:
         time.sleep(IMAGE_PAUSE.get(path, INTRO_GAP))
     except Exception:
         log.exception("Image %s failed for %s", path, phone)  # never block the sign-up on an image
+
+
+def send_plans_prompt(phone: str, body: str, fallback_text: str) -> None:
+    """Send the plans image with clickable Standard / Premium / VIP buttons."""
+    img_url = f"{plans.public_url()}/{plans.PLAN_IMAGE}"
+    buttons = plans.plan_buttons()
+    try:
+        wa_id = whatsapp.send_buttons(phone, body, buttons, image_link=img_url)
+        store().log_message(phone, "assistant", f"[image: plans.jpg]\n{body}\n[Standard | Premium | VIP]", wa_id, "interactive")
+        return
+    except Exception:
+        log.exception("Plans image+buttons failed for %s - falling back", phone)
+    _send_image(phone, plans.PLAN_IMAGE)
+    try:
+        wa_id = whatsapp.send_buttons(phone, body, buttons)
+        store().log_message(phone, "assistant", f"{body}\n[Standard | Premium | VIP]", wa_id, "interactive")
+    except Exception:
+        log.exception("Plans buttons failed for %s - sending text menu", phone)
+        reply(phone, fallback_text)
+
+
+def send_payment_link(phone: str, offer: dict) -> None:
+    """Send a clickable CTA URL button that opens the payment gateway link (falls back to text link)."""
+    try:
+        wa_id = whatsapp.send_cta_url(phone, offer["body"], offer["button"], offer["url"], offer["footer"])
+        store().log_message(phone, "assistant", offer["fallback"], wa_id, "interactive")
+        return
+    except Exception:
+        log.exception("CTA URL payment button failed for %s - sending text link", phone)
+    reply(phone, offer["fallback"])
 
 
 def send_intro(phone: str) -> None:
@@ -275,9 +310,9 @@ def handle_reaction(msg: dict) -> None:
         return  # 😂 🤔 😮 etc.: nothing to say
 
     # Worried / sad: a short caring answer about the message they reacted to (uses the AI -> counts as a chat).
-    blocked = plans.limit_message(customer)
-    if blocked:
-        reply(phone, blocked)
+    caption, fallback = plans.limit_prompt(customer)
+    if caption:
+        send_plans_prompt(phone, caption, fallback)
         return
     reacted = next((r["message"] for r in s.recent_history(phone, limit=40)
                     if r.get("message_id") == msg.get("reacted_to")), "")
@@ -293,8 +328,10 @@ def handle_reaction(msg: dict) -> None:
         log.exception("Reaction reply failed for %s", phone)
         return
     try:
-        note = plans.use_chat(phone)
-        if note:
+        note, exhausted = plans.use_chat_status(phone)
+        if exhausted:
+            send_plans_prompt(phone, note, f"{note}\n\n{plans.plans_menu()}")
+        elif note:
             reply(phone, note)
     except Exception:
         log.exception("Could not count the chat for %s", phone)

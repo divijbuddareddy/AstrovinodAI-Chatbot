@@ -108,23 +108,21 @@ def _with_retries(do, attempts: int = 5):
         time.sleep(min(2 ** i, 20) + random.random())
 
 
-def send_text(to: str, body: str) -> str:
-    """Send one text message, return the WhatsApp message id."""
+def _post_message(payload: dict, label: str) -> str:
     resp = _with_retries(lambda: requests.post(
         f"{GRAPH}/{config.WHATSAPP_PHONE_NUMBER_ID}/messages",
         headers={**_HEADERS, "Content-Type": "application/json"},
-        json={
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": to,
-            "type": "text",
-            "text": {"preview_url": False, "body": body},
-        },
+        json={"messaging_product": "whatsapp", "recipient_type": "individual", **payload},
         timeout=30,
     ))
     if resp.status_code >= 400:
-        raise RuntimeError(f"WhatsApp send failed ({resp.status_code}): {resp.text}")
+        raise RuntimeError(f"WhatsApp {label} failed ({resp.status_code}): {resp.text}")
     return (resp.json().get("messages") or [{}])[0].get("id", "")
+
+
+def send_text(to: str, body: str) -> str:
+    """Send one text message, return the WhatsApp message id."""
+    return _post_message({"to": to, "type": "text", "text": {"preview_url": False, "body": body}}, "send")
 
 
 def send_image(to: str, link: str, caption: str = "") -> str:
@@ -132,42 +130,50 @@ def send_image(to: str, link: str, caption: str = "") -> str:
     image = {"link": link}
     if caption:
         image["caption"] = caption[:1024]
-    resp = _with_retries(lambda: requests.post(
-        f"{GRAPH}/{config.WHATSAPP_PHONE_NUMBER_ID}/messages",
-        headers={**_HEADERS, "Content-Type": "application/json"},
-        json={"messaging_product": "whatsapp", "recipient_type": "individual", "to": to, "type": "image", "image": image},
-        timeout=30,
-    ))
-    if resp.status_code >= 400:
-        raise RuntimeError(f"WhatsApp image send failed ({resp.status_code}): {resp.text}")
-    return (resp.json().get("messages") or [{}])[0].get("id", "")
+    return _post_message({"to": to, "type": "image", "image": image}, "image send")
 
 
 def send_list(to: str, body: str, button: str, rows: list[tuple[str, str]], section: str = "Languages") -> str:
     """Send a tap-to-choose list (WhatsApp interactive list, max 10 rows). rows = [(id, title<=24 chars)].
     The client's tap comes back as an 'interactive' message whose text is the row title."""
-    resp = _with_retries(lambda: requests.post(
-        f"{GRAPH}/{config.WHATSAPP_PHONE_NUMBER_ID}/messages",
-        headers={**_HEADERS, "Content-Type": "application/json"},
-        json={
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": to,
-            "type": "interactive",
-            "interactive": {
-                "type": "list",
-                "body": {"text": body[:1024]},
-                "action": {"button": button[:20], "sections": [{
-                    "title": section[:24],
-                    "rows": [{"id": rid[:200], "title": title[:24]} for rid, title in rows[:10]],
-                }]},
-            },
+    return _post_message({
+        "to": to,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "body": {"text": body[:1024]},
+            "action": {"button": button[:20], "sections": [{
+                "title": section[:24],
+                "rows": [{"id": rid[:200], "title": title[:24]} for rid, title in rows[:10]],
+            }]},
         },
-        timeout=30,
-    ))
-    if resp.status_code >= 400:
-        raise RuntimeError(f"WhatsApp list send failed ({resp.status_code}): {resp.text}")
-    return (resp.json().get("messages") or [{}])[0].get("id", "")
+    }, "list send")
+
+
+def send_buttons(to: str, body: str, buttons: list[tuple[str, str]], image_link: str = "") -> str:
+    """Send up to 3 tap-to-reply buttons, optionally with an image header. buttons = [(id, title<=20 chars)]."""
+    interactive: dict = {
+        "type": "button",
+        "body": {"text": body[:1024]},
+        "action": {"buttons": [
+            {"type": "reply", "reply": {"id": bid[:256], "title": title[:20]}} for bid, title in buttons[:3]
+        ]},
+    }
+    if image_link:
+        interactive["header"] = {"type": "image", "image": {"link": image_link}}
+    return _post_message({"to": to, "type": "interactive", "interactive": interactive}, "buttons send")
+
+
+def send_cta_url(to: str, body: str, button_text: str, url: str, footer: str = "") -> str:
+    """Send an interactive CTA URL button so tapping opens the URL directly."""
+    interactive: dict = {
+        "type": "cta_url",
+        "body": {"text": body[:1024]},
+        "action": {"name": "cta_url", "parameters": {"display_text": button_text[:20], "url": url}},
+    }
+    if footer:
+        interactive["footer"] = {"text": footer[:60]}
+    return _post_message({"to": to, "type": "interactive", "interactive": interactive}, "cta_url send")
 
 
 def download_media(media_id: str) -> tuple[bytes, str]:

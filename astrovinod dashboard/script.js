@@ -271,8 +271,9 @@
 
   /* ---------------- subscription plans ---------------- */
   const PLAN_INFO = {
-    free: { name: "FREE", icon: "🆓" }, gold: { name: "GOLD", icon: "🥇" },
-    platinum: { name: "PLATINUM", icon: "💎" }, vip: { name: "VIP", icon: "👑" },
+    free: { name: "FREE", icon: "🆓" }, standard: { name: "STANDARD", icon: "⭐" },
+    premium: { name: "PREMIUM", icon: "💎" }, vip: { name: "VIP", icon: "👑" },
+    gold: { name: "STANDARD", icon: "⭐" }, platinum: { name: "PREMIUM", icon: "💎" },
   };
   const planBadge = (p) => (p && p !== "free" && PLAN_INFO[p])
     ? `<span class="plan-badge ${p}">${PLAN_INFO[p].name}</span>` : "";
@@ -480,7 +481,7 @@
     const now = Date.now(), min = 60e3, day = 864e5;
     const customers = [
       { phone: "919812345670", name: "Ravi Kumar", status: "active", dob: "14-08-1992", tob: "06:45 AM", place: "Hyderabad, Telangana",
-        lagna: "Leo", moon_sign: "Capricorn", nakshatra: "Shravana", created_at: now - 6 * day, plan: "gold", chats_used: 12, chat_limit: 150, plan_ends: now + 28 * day },
+        lagna: "Leo", moon_sign: "Capricorn", nakshatra: "Shravana", created_at: now - 6 * day, plan: "standard", chats_used: 12, chat_limit: 150, plan_ends: now + 28 * day },
       { phone: "919900112233", name: "Priya S.", status: "active", dob: "02-03-1995", tob: "11:20 PM", place: "Chennai, Tamil Nadu",
         lagna: "Scorpio", moon_sign: "Taurus", nakshatra: "Rohini", created_at: now - 3 * day, plan: "free", chats_used: 9, chat_limit: 10, plan_ends: now + 27 * day },
       { phone: "918712340000", name: "", status: "onboarding", created_at: now - day },
@@ -514,17 +515,17 @@
         const iso = (t) => new Date(t).toISOString();
         if (path.startsWith("/admin/api/plans")) {
           const pays = [
-            { phone: "919812345670", name: "Ravi Kumar", plan: "gold", amount: 299, status: "paid", gateway: "dummy", ref: "TEST-1A2B3C", created_at: iso(now - 2 * day), paid_at: iso(now - 2 * day) },
+            { phone: "919812345670", name: "Ravi Kumar", plan: "standard", amount: 299, status: "paid", gateway: "dummy", ref: "TEST-1A2B3C", created_at: iso(now - 2 * day), paid_at: iso(now - 2 * day) },
             { phone: "919845001122", name: "Anil Reddy", plan: "vip", amount: 4999, status: "paid", gateway: "dummy", ref: "TEST-9F8E7D", created_at: iso(now - 5 * day), paid_at: iso(now - 5 * day) },
-            { phone: "919900112233", name: "Priya S.", plan: "platinum", amount: 499, status: "created", gateway: "dummy", ref: "", created_at: iso(now - 3 * 60 * min), paid_at: "" },
+            { phone: "919900112233", name: "Priya S.", plan: "premium", amount: 499, status: "created", gateway: "dummy", ref: "", created_at: iso(now - 3 * 60 * min), paid_at: "" },
           ];
           const member = (p, used) => ({ phone: p.phone, name: p.name, chats_used: used, started: p.paid_at, ends: iso(toDate(p.paid_at).getTime() + 30 * day), amount: p.amount, paid_at: p.paid_at, ref: p.ref });
           return {
             total_revenue: 5298, payments: pays,
             plans: [
               { id: "free", name: "FREE", price: 0, chats: 10, active: 2, revenue: 0, members: [] },
-              { id: "gold", name: "GOLD", price: 299, chats: 150, active: 1, revenue: 299, members: [member(pays[0], 12)] },
-              { id: "platinum", name: "PLATINUM", price: 499, chats: 300, active: 0, revenue: 0, members: [] },
+              { id: "standard", name: "STANDARD", price: 299, chats: 150, active: 1, revenue: 299, members: [member(pays[0], 12)] },
+              { id: "premium", name: "PREMIUM", price: 499, chats: 300, active: 0, revenue: 0, members: [] },
               { id: "vip", name: "VIP", price: 4999, chats: null, active: 1, revenue: 4999, members: [member(pays[1], 47)] },
             ],
           };

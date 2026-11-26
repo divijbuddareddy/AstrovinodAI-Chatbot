@@ -273,8 +273,8 @@ input::placeholder { color: var(--muted); }
 }
 .plans-btn:hover { background: var(--green-dark); }
 .plan-badge { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 4px; margin-left: 6px; vertical-align: 2px; }
-.plan-badge.gold { background: #fff0c2; color: #8a6300; }
-.plan-badge.platinum { background: #e3e9f7; color: #3b4f8a; }
+.plan-badge.standard, .plan-badge.gold { background: #fff0c2; color: #8a6300; }
+.plan-badge.premium, .plan-badge.platinum { background: #e3e9f7; color: #3b4f8a; }
 .plan-badge.vip { background: #f6e1f1; color: #8a1f6d; }
 
 .app { position: relative; }
@@ -287,8 +287,8 @@ input::placeholder { color: var(--muted); }
 .plans-summary .stat b { font-size: 22px; }
 .plan-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 22px; }
 .plan-card { background: var(--panel); border-radius: 10px; box-shadow: var(--shadow); padding: 16px; border-top: 4px solid var(--line); }
-.plan-card.gold { border-top-color: #d4a017; }
-.plan-card.platinum { border-top-color: #6f86c9; }
+.plan-card.standard, .plan-card.gold { border-top-color: #d4a017; }
+.plan-card.premium, .plan-card.platinum { border-top-color: #6f86c9; }
 .plan-card.vip { border-top-color: #b03a91; }
 .plan-card.free { border-top-color: var(--green); }
 .plan-card h3 { margin: 0; font-size: 17px; }

@@ -61,7 +61,7 @@ def list_customers(authorization: str | None = Header(None)) -> list[dict]:
     for r in rows:
         state = r["conversation_state"] or "onboarding"
         sub = subs.get(r["phone_number"])
-        plan = sub["plan"] if sub and plans.is_active(sub) else "free"
+        plan = plans.norm_plan(sub["plan"]) if sub and plans.is_active(sub) else "free"
         out.append({
             "phone": r["phone_number"],
             "name": r["full_name"] or r["profile_name"],
@@ -99,13 +99,13 @@ def list_plans(authorization: str | None = Header(None)) -> dict:
     last_paid = {}
     for p in pays:  # newest first -> first paid row per customer is their latest payment
         if p["status"] == "paid":
-            last_paid.setdefault((p["phone_number"], p["plan"]), p)
+            last_paid.setdefault((p["phone_number"], plans.norm_plan(p["plan"])), p)
 
     out = []
     for key, p in plans.PLANS.items():
         members = []
         for phone, s in subs.items():
-            if s["plan"] == key and plans.is_active(s) and key != "free":
+            if plans.norm_plan(s["plan"]) == key and plans.is_active(s) and key != "free":
                 pay = last_paid.get((phone, key), {})
                 members.append({"phone": phone, "name": names.get(phone, ""), "chats_used": s["chats_used"],
                                 "started": s["period_start"], "ends": s["period_end"],
@@ -113,10 +113,10 @@ def list_plans(authorization: str | None = Header(None)) -> dict:
                                 "ref": pay.get("gateway_ref", "")})
         members.sort(key=lambda m: m["paid_at"], reverse=True)
         out.append({"id": key, **p, "active": len(members),
-                    "revenue": sum(x["amount"] for x in pays if x["plan"] == key and x["status"] == "paid"),
+                    "revenue": sum(x["amount"] for x in pays if plans.norm_plan(x["plan"]) == key and x["status"] == "paid"),
                     "members": members})
     out[0]["active"] = max(0, len(names) - sum(o["active"] for o in out[1:]))  # everyone not on a paid plan
-    payments =[{"phone": x["phone_number"], "name": names.get(x["phone_number"], ""), "plan": x["plan"],
+    payments = [{"phone": x["phone_number"], "name": names.get(x["phone_number"], ""), "plan": plans.norm_plan(x["plan"]),
                  "amount": x["amount"], "status": x["status"], "gateway": x["gateway"], "ref": x["gateway_ref"],
                  "created_at": x["created_at"], "paid_at": x["paid_at"]} for x in pays]
     return {"plans": out, "payments": payments,

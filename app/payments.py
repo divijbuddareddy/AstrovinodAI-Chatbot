@@ -84,7 +84,7 @@ def _finish(token: str, ref: str) -> dict | None:
 
 
 def _paid_page(pay: dict) -> HTMLResponse:
-    p = plans.PLANS[pay["plan"]]
+    p = plans.plan_info(pay["plan"])
     return _message("✅", "Payment successful",
                     f"Your <b>{p['name']}</b> plan is active. Reference {html.escape(pay['gateway_ref'])}.<br>"
                     "You can close this page and continue on WhatsApp.")
@@ -132,7 +132,7 @@ def checkout(token: str):
     pay, page = _usable(token)
     if page:
         return page
-    p = plans.PLANS[pay["plan"]]
+    p = plans.plan_info(pay["plan"])
     chats = "Unlimited" if p["chats"] is None else str(p["chats"])
     t = html.escape(token)
     real = pay["gateway"] == "phonepe" and phonepe.enabled()
@@ -167,7 +167,7 @@ def start(token: str):
     if not phonepe.enabled():
         return RedirectResponse(f"/pay/{token}", status_code=303)
     mid = f"{token}-{int(time.time())}"[:63]  # new order id per attempt (PhonePe ids can't be reused)
-    p = plans.PLANS[pay["plan"]]
+    p = plans.plan_info(pay["plan"])
     try:
         url = phonepe.create_payment(mid, pay["amount"], f"{plans.public_url()}/pay/{token}/done", token,
                                      f"AstroVinod {p['name']} plan")
