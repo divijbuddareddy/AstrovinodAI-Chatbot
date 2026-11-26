@@ -138,7 +138,7 @@ def _chat_status_note(plan_key: str, left: int | None) -> tuple[str, bool]:
         return (f"ℹ️ You have *{left} free chats left* in your *{name}* plan for this period.\n\n"
                 "Tap a plan below to upgrade anytime, or keep asking your remaining 5 questions:"), True
     if left <= 2:
-        return f"ℹ️ {left} chat{'s' if left > 1 else ''} left in your *{name}* plan. Reply *PLANS* to upgrade anytime.", False
+        return f"ℹ️ {left} chat{'s' if left > 1 else ''} left in your *{name}* plan. Tap *PLANS* below to upgrade anytime.", False
     return "", False
 
 

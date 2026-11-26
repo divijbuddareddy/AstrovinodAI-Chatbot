@@ -230,7 +230,12 @@ def _count_chat(phone: str) -> bool:
         if show_plans:
             send_plans_prompt(phone, note, f"{note}\n\n{plans.plans_menu()}")
         elif note:
-            reply(phone, note)
+            try:
+                wa_id = whatsapp.send_buttons(phone, note, [("show_plans", "PLANS")])
+                store().log_message(phone, "assistant", f"{note}\n[PLANS]", wa_id, "interactive")
+            except Exception:
+                log.exception("PLANS button failed for %s - sending text reminder", phone)
+                reply(phone, note)
         return show_plans
     except Exception:
         log.exception("Could not count the chat for %s", phone)
