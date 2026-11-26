@@ -202,7 +202,7 @@ def handle(msg: dict) -> None:
                     except Exception:
                         log.exception("Could not count the chat for %s", phone)
                 if new_day and not exhausted and result.action == "answer_question":
-                    send_questions_menu(phone)
+                    _schedule_questions_menu(phone, customer.get("last_message_id", ""), delay=5)
         except Exception:
             log.exception("Failed to handle message %s from %s", mid, phone)
             if not notified:
@@ -281,6 +281,9 @@ def send_language_menu(phone: str, with_image: bool = False) -> None:
         reply(phone, i18n.MENU_TEXT_FALLBACK)
 
 
+QUESTION_MENU_DELAY = 15  # seconds after the full horoscope report so the client can start reading first
+
+
 def send_questions_menu(phone: str) -> None:
     """Tap-to-choose follow-up questions list sent after the full horoscope report."""
     try:
@@ -291,6 +294,19 @@ def send_questions_menu(phone: str) -> None:
     except Exception:
         log.exception("Questions list failed for %s - sending the text menu", phone)
         reply(phone, i18n.QUESTION_MENU_TEXT_FALLBACK)
+
+
+def _schedule_questions_menu(phone: str, expected_mid: str, delay: int = QUESTION_MENU_DELAY) -> None:
+    """Send the questions menu after a pause, unless the client already sent another message."""
+    def run():
+        with _phone_locks[phone]:
+            try:
+                latest = store().get_customer(phone)
+                if latest and latest.get("last_message_id", "") == expected_mid:
+                    send_questions_menu(phone)
+            except Exception:
+                log.exception("Delayed questions menu failed for %s", phone)
+    threading.Timer(delay, run).start()
 
 
 # ---------------------------------------------------------------- emoji reactions
@@ -579,7 +595,7 @@ def generate_horoscope(customer: dict) -> None:
         return
     report = ai.horoscope_report(customer, chart, now_context(customer, chart))
     reply(phone, report)
-    send_questions_menu(phone)
+    _schedule_questions_menu(phone, customer.get("last_message_id", ""))
 
 
 def answer(customer: dict, msg: dict) -> None:
