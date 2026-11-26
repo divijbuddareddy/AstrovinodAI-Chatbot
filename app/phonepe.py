@@ -1,8 +1,9 @@
-"""PhonePe Payment Gateway - Standard Checkout v2 (plain HTTPS, no SDK).
+"""PhonePe Payment Gateway v2 - Standard Checkout & UPI AutoPay Subscriptions (plain HTTPS, no SDK).
 
-Render settings:
+Render / .env settings:
   PHONEPE_CLIENT_ID, PHONEPE_CLIENT_SECRET, PHONEPE_CLIENT_VERSION   from PhonePe Business > Developer Settings > API Keys
   PHONEPE_ENV                    production (default) | sandbox
+  PHONEPE_AUTOPAY                true (default) | false (set false only if Subscriptions aren't enabled yet)
   PHONEPE_WEBHOOK_USER / _PASS   optional: the username/password entered in PhonePe > Developer Settings > Webhooks
 
 A payment is only ever treated as paid after PhonePe's Order Status API says COMPLETED.
@@ -37,6 +38,10 @@ def _env(name: str) -> str:
 
 def enabled() -> bool:
     return bool(_env("PHONEPE_CLIENT_ID") and _env("PHONEPE_CLIENT_SECRET"))
+
+
+def autopay_enabled() -> bool:
+    return _env("PHONEPE_AUTOPAY").lower() not in ("0", "false", "no", "off")
 
 
 def _urls() -> dict:
@@ -79,6 +84,111 @@ def create_payment(merchant_order_id: str, amount_rupees: int, redirect_url: str
     if r.status_code != 200 or not r.json().get("redirectUrl"):
         raise PhonePeError(f"PhonePe create payment failed ({r.status_code}): {r.text[:300]}")
     return r.json()["redirectUrl"]
+
+
+def create_subscription_setup(merchant_order_id: str, merchant_subscription_id: str, amount_rupees: int,
+                              redirect_url: str, payment_token: str, expire_at_ms: int,
+                              message: str = "") -> str:
+    """Create a 3-year monthly AutoPay subscription setup order; returns PhonePe's checkout URL."""
+    paise = int(amount_rupees) * 100
+    body = {
+        "merchantOrderId": merchant_order_id,
+        "amount": paise,
+        "expireAfter": 1200,
+        "metaInfo": {"udf1": payment_token, "udf2": merchant_subscription_id},
+        "paymentFlow": {
+            "type": "SUBSCRIPTION_SETUP",
+            "merchantSubscriptionId": merchant_subscription_id,
+            "authWorkflowType": "TRANSACTION",
+            "amountType": "FIXED",
+            "maxAmount": paise,
+            "frequency": "MONTHLY",
+            "expireAt": int(expire_at_ms),
+            "message": message[:100],
+            "merchantUrls": {"redirectUrl": redirect_url},
+        },
+    }
+    r = requests.post(_urls()["pg"] + "/checkout/v2/pay", json=body, headers=_auth_header(), timeout=TIMEOUT)
+    if r.status_code != 200 or not r.json().get("redirectUrl"):
+        raise PhonePeError(f"PhonePe subscription setup failed ({r.status_code}): {r.text[:300]}")
+    return r.json()["redirectUrl"]
+
+
+def subscription_status(merchant_subscription_id: str) -> dict:
+    """Return {"state": ACTIVE|PAUSED|CANCELLED|REVOKED|..., "subscription_id": str, "expire_at": int}."""
+    r = requests.get(f"{_urls()['pg']}/subscriptions/v2/{merchant_subscription_id}/status",
+                     params={"details": "false"}, headers=_auth_header(), timeout=TIMEOUT)
+    if r.status_code != 200:
+        raise PhonePeError(f"PhonePe subscription status failed ({r.status_code}): {r.text[:300]}")
+    d = r.json()
+    return {
+        "state": d.get("state", ""),
+        "subscription_id": d.get("subscriptionId", ""),
+        "expire_at": int(d.get("expireAt") or 0),
+    }
+
+
+def notify_redemption(merchant_order_id: str, merchant_subscription_id: str, amount_rupees: int,
+                      expire_at_ms: int) -> dict:
+    """Send the mandatory 24h pre-debit notification before charging a monthly AutoPay cycle."""
+    body = {
+        "merchantOrderId": merchant_order_id,
+        "amount": int(amount_rupees) * 100,
+        "expireAt": int(expire_at_ms),
+        "paymentFlow": {
+            "type": "SUBSCRIPTION_REDEMPTION",
+            "merchantSubscriptionId": merchant_subscription_id,
+            "redemptionRetryStrategy": "STANDARD",
+            "autoDebit": True,
+        },
+    }
+    r = requests.post(_urls()["pg"] + "/subscriptions/v2/notify", json=body, headers=_auth_header(), timeout=TIMEOUT)
+    if r.status_code != 200:
+        raise PhonePeError(f"PhonePe notify redemption failed ({r.status_code}): {r.text[:300]}")
+    return r.json()
+
+
+def execute_redemption(merchant_order_id: str, merchant_subscription_id: str, amount_rupees: int) -> dict:
+    """Execute the monthly AutoPay debit after the 24h pre-debit notification window."""
+    body = {
+        "merchantOrderId": merchant_order_id,
+        "amount": int(amount_rupees) * 100,
+        "paymentFlow": {
+            "type": "SUBSCRIPTION_REDEMPTION",
+            "merchantSubscriptionId": merchant_subscription_id,
+            "redemptionRetryStrategy": "STANDARD",
+            "autoDebit": True,
+        },
+    }
+    r = requests.post(_urls()["pg"] + "/subscriptions/v2/redeem", json=body, headers=_auth_header(), timeout=TIMEOUT)
+    if r.status_code != 200:
+        raise PhonePeError(f"PhonePe execute redemption failed ({r.status_code}): {r.text[:300]}")
+    return r.json()
+
+
+def redemption_order_status(merchant_order_id: str) -> dict:
+    """Check the status of a recurring redemption order."""
+    r = requests.get(f"{_urls()['pg']}/subscriptions/v2/order/{merchant_order_id}/status",
+                     params={"details": "false"}, headers=_auth_header(), timeout=TIMEOUT)
+    if r.status_code == 404:
+        return order_status(merchant_order_id)
+    if r.status_code != 200:
+        raise PhonePeError(f"PhonePe redemption status failed ({r.status_code}): {r.text[:300]}")
+    d = r.json()
+    txn = ""
+    for p in d.get("paymentDetails") or []:
+        if p.get("state") == "COMPLETED" or not txn:
+            txn = p.get("transactionId") or txn
+    return {"state": d.get("state", "PENDING"), "amount": int(d.get("amount") or 0), "transaction_id": txn}
+
+
+def cancel_subscription(merchant_subscription_id: str) -> dict:
+    """Cancel an active PhonePe AutoPay mandate."""
+    r = requests.post(f"{_urls()['pg']}/subscriptions/v2/{merchant_subscription_id}/cancel",
+                      headers=_auth_header(), timeout=TIMEOUT)
+    if r.status_code != 200:
+        raise PhonePeError(f"PhonePe cancel subscription failed ({r.status_code}): {r.text[:300]}")
+    return r.json()
 
 
 def order_status(merchant_order_id: str) -> dict:

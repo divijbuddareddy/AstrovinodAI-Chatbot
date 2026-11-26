@@ -47,6 +47,24 @@ def _connect_sheets() -> None:
     logging.getLogger("astrovinod").info("Storage ready: %s", type(bot.store()).__name__)
 
 
+@app.on_event("startup")
+def _start_autopay_worker() -> None:
+    import threading
+    import time
+    from app import plans
+
+    def loop() -> None:
+        time.sleep(60)
+        while True:
+            try:
+                plans.process_autopay_renewals()
+            except Exception:
+                logging.getLogger("astrovinod").exception("AutoPay renewal loop failed")
+            time.sleep(6 * 3600)
+
+    threading.Thread(target=loop, daemon=True, name="autopay-renewals").start()
+
+
 @app.api_route("/health", methods=["GET", "HEAD"])  # Render health check + uptime pinger (keeps free tier awake)
 def health() -> dict:
     return {"ok": True}

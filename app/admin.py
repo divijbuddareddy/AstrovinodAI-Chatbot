@@ -80,6 +80,9 @@ def list_customers(authorization: str | None = Header(None)) -> list[dict]:
             "chats_used": sub["chats_used"] if sub and plans.is_active(sub) else 0,
             "chat_limit": plans.PLANS[plan]["chats"],
             "plan_ends": sub["period_end"] if sub and plans.is_active(sub) else "",
+            "billing_mode": sub.get("billing_mode", "") if sub else "",
+            "mandate_state": sub.get("mandate_state", "") if sub else "",
+            "mandate_expires_at": sub.get("mandate_expires_at", "") if sub else "",
             **_chart_highlights(r["chart_summary"]),
         })
     out.sort(key=lambda c: c["last_time"] or "", reverse=True)
@@ -109,6 +112,8 @@ def list_plans(authorization: str | None = Header(None)) -> dict:
                 pay = last_paid.get((phone, key), {})
                 members.append({"phone": phone, "name": names.get(phone, ""), "chats_used": s["chats_used"],
                                 "started": s["period_start"], "ends": s["period_end"],
+                                "billing_mode": s.get("billing_mode", ""), "mandate_state": s.get("mandate_state", ""),
+                                "mandate_expires_at": s.get("mandate_expires_at", ""),
                                 "amount": pay.get("amount", p["price"]), "paid_at": pay.get("paid_at", ""),
                                 "ref": pay.get("gateway_ref", "")})
         members.sort(key=lambda m: m["paid_at"], reverse=True)
@@ -133,3 +138,10 @@ def get_chat(phone: str, authorization: str | None = Header(None)) -> list[dict]
         rows = conn.execute(q).mappings().all()
     return [{"role": r["role"], "text": r["message"], "time": r["timestamp"], "type": r["message_type"]}
             for r in reversed(rows)]
+
+
+@router.post("/run-renewals")
+def run_renewals(authorization: str | None = Header(None)) -> dict:
+    """Trigger monthly AutoPay pre-debit notifications & due redemptions (for external cron)."""
+    _check(authorization)
+    return plans.process_autopay_renewals()

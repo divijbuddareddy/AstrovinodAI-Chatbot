@@ -119,6 +119,9 @@
       chatsUsed: Number(pick(c, "chats_used") || 0),
       chatLimit: c.chat_limit === undefined ? 10 : c.chat_limit, // null = unlimited
       planEnds: toDate(pick(c, "plan_ends")),
+      billingMode: pick(c, "billing_mode"),
+      mandateState: pick(c, "mandate_state"),
+      mandateEnds: toDate(pick(c, "mandate_expires_at")),
     };
   }
 
@@ -253,7 +256,8 @@
         ? `${c.chatsUsed} used · unlimited`
         : `${c.chatsUsed} of ${c.chatLimit} used · ${Math.max(0, c.chatLimit - c.chatsUsed)} left`}</b>
         ${c.chatLimit == null ? "" : `<div class="usage"><span style="width:${Math.min(100, 100 * c.chatsUsed / (c.chatLimit || 1))}%"></span></div>`}</div>
-      ${f(c.plan === "free" ? "Chats renew on" : "Plan valid till", c.planEnds ? c.planEnds.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) : "")}
+      ${f(c.plan === "free" ? "Chats renew on" : (c.mandateState === "ACTIVE" ? "Next AutoPay debit" : "Plan valid till"), c.planEnds ? c.planEnds.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) : "")}
+      ${c.mandateState ? f("AutoPay mandate", `${c.mandateState}${c.mandateEnds ? " · valid till " + c.mandateEnds.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) : ""}`) : ""}
       ${f("Language", c.language || "Not chosen (replies match the customer's language)")}
       ${f("Date of birth", c.dob)}
       ${f("Time of birth", c.tob)}
@@ -304,7 +308,7 @@
           <div class="member" data-phone="${esc(m.phone)}">
             <div class="who"><span>${esc(m.name || maskPhone(m.phone))}</span><span>${rupees(m.amount)}</span></div>
             <div class="sub">${esc(maskPhone(m.phone))} · paid ${esc(shortDate(m.paid_at || m.started))}</div>
-            <div class="sub">Valid till ${esc(shortDate(m.ends))} · ${m.chats_used} chat${m.chats_used === 1 ? "" : "s"} used${p.chats == null ? "" : " of " + p.chats}${m.ref ? " · " + esc(m.ref) : ""}</div>
+            <div class="sub">Next renewal ${esc(shortDate(m.ends))} · ${m.chats_used} chat${m.chats_used === 1 ? "" : "s"} used${p.chats == null ? "" : " of " + p.chats}${m.mandate_state ? " · AutoPay " + esc(m.mandate_state) : ""}${m.ref ? " · " + esc(m.ref) : ""}</div>
           </div>`).join("");
       }
       return `
