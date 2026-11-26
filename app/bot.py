@@ -194,17 +194,8 @@ def handle(msg: dict) -> None:
                         _try_later(phone, generate_horoscope if result.action == "finish_onboarding" else fn,
                                    msg if args else None)
                     raise
-                exhausted = False
-                if counted:
-                    try:
-                        note, exhausted = plans.use_chat_status(phone)
-                        if exhausted:
-                            send_plans_prompt(phone, note, f"{note}\n\n{plans.plans_menu()}")
-                        elif note:
-                            reply(phone, note)
-                    except Exception:
-                        log.exception("Could not count the chat for %s", phone)
-                if new_day and not exhausted and result.action == "answer_question":
+                shown_plans = _count_chat(phone) if counted else False
+                if new_day and not shown_plans and result.action == "answer_question":
                     _schedule_questions_menu(phone, customer.get("last_message_id", ""), delay=5)
         except Exception:
             log.exception("Failed to handle message %s from %s", mid, phone)
@@ -230,6 +221,20 @@ def _send_image(phone: str, path: str) -> None:
         time.sleep(IMAGE_PAUSE.get(path, INTRO_GAP))
     except Exception:
         log.exception("Image %s failed for %s", path, phone)  # never block the sign-up on an image
+
+
+def _count_chat(phone: str) -> bool:
+    """Record one chat and notify or show the plans image at milestones. Returns True if plans image was sent."""
+    try:
+        note, show_plans = plans.use_chat_status(phone)
+        if show_plans:
+            send_plans_prompt(phone, note, f"{note}\n\n{plans.plans_menu()}")
+        elif note:
+            reply(phone, note)
+        return show_plans
+    except Exception:
+        log.exception("Could not count the chat for %s", phone)
+        return False
 
 
 def send_plans_prompt(phone: str, body: str, fallback_text: str) -> None:
@@ -390,14 +395,7 @@ def handle_reaction(msg: dict) -> None:
     except Exception:
         log.exception("Reaction reply failed for %s", phone)
         return
-    try:
-        note, exhausted = plans.use_chat_status(phone)
-        if exhausted:
-            send_plans_prompt(phone, note, f"{note}\n\n{plans.plans_menu()}")
-        elif note:
-            reply(phone, note)
-    except Exception:
-        log.exception("Could not count the chat for %s", phone)
+    _count_chat(phone)
 
 
 def ensure_chart(customer: dict, force: bool = False) -> dict:

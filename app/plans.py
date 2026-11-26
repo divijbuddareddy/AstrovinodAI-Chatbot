@@ -126,30 +126,37 @@ def remaining(sub: dict) -> int | None:
     return None if limit is None else max(0, limit - sub["chats_used"])
 
 
+def _chat_status_note(plan_key: str, left: int | None) -> tuple[str, bool]:
+    """Return (note, show_plans_image) for the remaining chats after counting one chat."""
+    if left is None:
+        return "", False
+    name = PLANS[plan_key]["name"]
+    if left == 0:
+        return (f"ℹ️ That was the last chat of your *{name}* plan for this period.\n\n"
+                "Choose a plan below to continue:"), True
+    if plan_key == "free" and left == 5:
+        return (f"ℹ️ You have *{left} free chats left* in your *{name}* plan for this period.\n\n"
+                "Tap a plan below to upgrade anytime, or keep asking your remaining 5 questions:"), True
+    if left <= 2:
+        return f"ℹ️ {left} chat{'s' if left > 1 else ''} left in your *{name}* plan. Reply *PLANS* to upgrade anytime.", False
+    return "", False
+
+
 def use_chat_status(phone: str) -> tuple[str, bool]:
-    """Count one chat. Returns (message, exhausted_now)."""
+    """Count one chat. Returns (message, show_plans_image)."""
     sub = get(phone)
     with _engine().begin() as conn:
         conn.execute(update(subscriptions).where(subscriptions.c.phone_number == phone)
                      .values(chats_used=subscriptions.c.chats_used + 1, updated_at=_iso(_now())))
     sub["chats_used"] += 1
-    left = remaining(sub)
-    if left is None or left > 2:
-        return "", False
-    name = plan_info(sub.get("plan"))["name"]
-    if left == 0:
-        return (f"ℹ️ That was the last chat of your *{name}* plan for this period.\n\n"
-                "Choose a plan below to continue:"), True
-    return f"ℹ️ {left} chat{'s' if left > 1 else ''} left in your *{name}* plan. Reply *PLANS* to upgrade anytime.", False
+    return _chat_status_note(norm_plan(sub.get("plan")), remaining(sub))
 
 
 def use_chat(phone: str) -> str:
     """Count one chat. Returns a short note when the customer is running out ("" otherwise)."""
-    msg, exhausted = use_chat_status(phone)
-    if exhausted:
-        name = plan_info(get(phone).get("plan"))["name"]
-        return (f"ℹ️ That was the last chat of your *{name}* plan for this period. "
-                "Reply *PLANS* to see options to continue.")
+    msg, show_plans = use_chat_status(phone)
+    if show_plans:
+        return f"{msg}\n\n{plans_menu()}"
     return msg
 
 
