@@ -1,6 +1,6 @@
 """Subscription plans: monthly chat limits, plan purchases and payments.
 
-Plans                 FREE 10 chats / GOLD 100 / PLATINUM 500 / VIP unlimited, per 30 days.
+Plans                 FREE 10 chats / GOLD 150 / PLATINUM 300 / VIP unlimited, per 30 days.
 What counts as a chat Every question after the birth profile is set up (registration and the first report are free).
 Period               30 days. FREE restarts every 30 days; a paid plan lasts 30 days from payment, then back to FREE.
 
@@ -21,9 +21,9 @@ LINK_VALID = timedelta(hours=24)
 
 PLANS = {
     "free":     {"name": "FREE",     "price": 0,    "chats": 10,   "icon": "🆓"},
-    "gold":     {"name": "GOLD",     "price": 149,  "chats": 100,  "icon": "🥇"},
-    "platinum": {"name": "PLATINUM", "price": 999,  "chats": 500,  "icon": "💎"},
-    "vip":      {"name": "VIP",      "price": 5999, "chats": None, "icon": "👑"},  # None = unlimited
+    "gold":     {"name": "GOLD",     "price": 299,  "chats": 150,  "icon": "🥇"},
+    "platinum": {"name": "PLATINUM", "price": 499,  "chats": 300,  "icon": "💎"},
+    "vip":      {"name": "VIP",      "price": 4999, "chats": None, "icon": "👑"},  # None = unlimited
 }
 PAID = ("gold", "platinum", "vip")
 
