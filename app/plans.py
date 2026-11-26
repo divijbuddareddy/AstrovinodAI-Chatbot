@@ -28,6 +28,11 @@ PLANS = {
 PAID = ("standard", "premium", "vip")
 _LEGACY_PLANS = {"gold": "standard", "platinum": "premium"}
 PLAN_IMAGE = "static/plans.jpg"
+PLAN_IMAGES = {
+    "standard": "static/standard.jpg",
+    "premium":  "static/premium.jpg",
+    "vip":      "static/vip.jpg",
+}
 
 
 def norm_plan(plan: str | None) -> str:
@@ -227,7 +232,7 @@ def payment_offer(phone: str, plan: str) -> dict:
                 "_The link is valid for 24 hours. Your plan starts as soon as the payment is done._")
     return {"plan": plan, "price": p["price"], "url": url, "body": body,
             "button": f"Pay ₹{p['price']} Now", "footer": "Valid 24 hours · Secure checkout",
-            "fallback": fallback}
+            "image_path": PLAN_IMAGES.get(plan, ""), "fallback": fallback}
 
 
 def handle_command(customer: dict, text: str) -> dict | None:

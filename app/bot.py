@@ -262,13 +262,26 @@ def send_plans_prompt(phone: str, body: str, fallback_text: str) -> None:
 
 
 def send_payment_link(phone: str, offer: dict) -> None:
-    """Send a clickable CTA URL button that opens the payment gateway link (falls back to text link)."""
+    """Send a clickable CTA URL button (with the plan's image) that opens the payment gateway link."""
+    img_path = offer.get("image_path", "")
+    img_url = f"{plans.public_url()}/{img_path}" if img_path else ""
+    try:
+        wa_id = whatsapp.send_cta_url(
+            phone, offer["body"], offer["button"], offer["url"], offer["footer"], image_link=img_url
+        )
+        prefix = f"[image: {img_path.rsplit('/', 1)[-1]}]\n" if img_path else ""
+        store().log_message(phone, "assistant", prefix + offer["fallback"], wa_id, "interactive")
+        return
+    except Exception:
+        log.exception("CTA URL payment button failed for %s - falling back", phone)
+    if img_path:
+        _send_image(phone, img_path)
     try:
         wa_id = whatsapp.send_cta_url(phone, offer["body"], offer["button"], offer["url"], offer["footer"])
         store().log_message(phone, "assistant", offer["fallback"], wa_id, "interactive")
         return
     except Exception:
-        log.exception("CTA URL payment button failed for %s - sending text link", phone)
+        log.exception("CTA URL payment button (no image) failed for %s - sending text link", phone)
     reply(phone, offer["fallback"])
 
 

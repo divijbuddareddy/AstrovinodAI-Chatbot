@@ -167,13 +167,15 @@ def send_buttons(to: str, body: str, buttons: list[tuple[str, str]], image_link:
     return _post_message({"to": to, "type": "interactive", "interactive": interactive}, "buttons send")
 
 
-def send_cta_url(to: str, body: str, button_text: str, url: str, footer: str = "") -> str:
-    """Send an interactive CTA URL button so tapping opens the URL directly."""
+def send_cta_url(to: str, body: str, button_text: str, url: str, footer: str = "", image_link: str = "") -> str:
+    """Send an interactive CTA URL button (optionally with an image header) so tapping opens the URL directly."""
     interactive: dict = {
         "type": "cta_url",
         "body": {"text": body[:1024]},
         "action": {"name": "cta_url", "parameters": {"display_text": button_text[:20], "url": url}},
     }
+    if image_link:
+        interactive["header"] = {"type": "image", "image": {"link": image_link}}
     if footer:
         interactive["footer"] = {"text": footer[:60]}
     return _post_message({"to": to, "type": "interactive", "interactive": interactive}, "cta_url send")
