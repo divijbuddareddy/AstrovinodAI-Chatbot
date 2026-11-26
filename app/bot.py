@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import ai, astrology, i18n, intents, plans, vedic, whatsapp
@@ -127,6 +127,7 @@ def handle(msg: dict) -> None:
 
             existing = s.get_customer(phone)
             was_ready = (existing or {}).get("conversation_state") == "ready"
+            new_day = was_ready and _is_new_day(s, existing, mid)
 
             # Subscription commands (PLANS / STANDARD / PREMIUM / VIP) - never counted as chats.
             if was_ready and not msg["media_id"]:
@@ -137,6 +138,16 @@ def handle(msg: dict) -> None:
                     else:
                         send_payment_link(phone, cmd)
                     return
+                if i18n.is_type_own_question(msg["text"]):
+                    reply(phone, i18n.t("type_own_question", existing.get("language")))
+                    return
+                if i18n.question_menu_choice(msg["text"]) == i18n.TYPE_OWN_QUESTION:
+                    hist = s.recent_history(phone, limit=2)
+                    if hist and hist[-1].get("message_id") == mid:
+                        hist = hist[:-1]
+                    if hist and hist[-1].get("role") == "assistant" and hist[-1].get("message") == i18n.QUESTION_MENU_TEXT_FALLBACK:
+                        reply(phone, i18n.t("type_own_question", existing.get("language")))
+                        return
 
             result = step(existing, phone, msg["profile_name"], msg["text"], msg["type"])
             customer = result.customer
@@ -159,6 +170,10 @@ def handle(msg: dict) -> None:
             if result.action in ("language_menu", "language_menu_image"):
                 send_language_menu(phone, with_image=result.action == "language_menu_image")
                 return
+            if result.action == "reply" and new_day and customer.get("conversation_state") == "ready":
+                if plans.remaining(plans.get(phone)) != 0:
+                    send_questions_menu(phone)
+                return
 
             actions = {"onboard": (onboard, (msg,)), "finish_onboarding": (finish_onboarding, ()),
                        "generate_horoscope": (generate_horoscope, ()), "answer_question": (answer, (msg,))}
@@ -176,6 +191,7 @@ def handle(msg: dict) -> None:
                         _try_later(phone, generate_horoscope if result.action == "finish_onboarding" else fn,
                                    msg if args else None)
                     raise
+                exhausted = False
                 if counted:
                     try:
                         note, exhausted = plans.use_chat_status(phone)
@@ -185,6 +201,8 @@ def handle(msg: dict) -> None:
                             reply(phone, note)
                     except Exception:
                         log.exception("Could not count the chat for %s", phone)
+                if new_day and not exhausted and result.action == "answer_question":
+                    send_questions_menu(phone)
         except Exception:
             log.exception("Failed to handle message %s from %s", mid, phone)
             if not notified:
@@ -261,6 +279,18 @@ def send_language_menu(phone: str, with_image: bool = False) -> None:
     except Exception:
         log.exception("Language list failed for %s - sending the text menu", phone)
         reply(phone, i18n.MENU_TEXT_FALLBACK)
+
+
+def send_questions_menu(phone: str) -> None:
+    """Tap-to-choose follow-up questions list sent after the full horoscope report."""
+    try:
+        wa_id = whatsapp.send_list(
+            phone, i18n.QUESTION_MENU_BODY, i18n.QUESTION_MENU_BUTTON, i18n.QUESTION_MENU_ITEMS, section="Questions"
+        )
+        store().log_message(phone, "assistant", i18n.QUESTION_MENU_BODY + "\n[questions menu]", wa_id, "interactive")
+    except Exception:
+        log.exception("Questions list failed for %s - sending the text menu", phone)
+        reply(phone, i18n.QUESTION_MENU_TEXT_FALLBACK)
 
 
 # ---------------------------------------------------------------- emoji reactions
@@ -365,6 +395,24 @@ def ensure_chart(customer: dict, force: bool = False) -> dict:
 
 def _tz(customer: dict) -> ZoneInfo:
     return ZoneInfo(customer.get("timezone") or "Asia/Kolkata")
+
+
+def _is_new_day(s, customer: dict, current_mid: str) -> bool:
+    """True if this ready client's previous message was on an earlier local calendar day."""
+    try:
+        rows = [r for r in s.recent_history(customer["phone_number"], limit=5) if r.get("message_id") != current_mid]
+        if not rows:
+            return False
+        ts = rows[-1].get("timestamp")
+        if not ts:
+            return False
+        prev_dt = datetime.fromisoformat(ts)
+        if prev_dt.tzinfo is None:
+            prev_dt = prev_dt.replace(tzinfo=timezone.utc)
+        tz = _tz(customer)
+        return prev_dt.astimezone(tz).date() < datetime.now(tz).date()
+    except Exception:
+        return False
 
 
 def now_context(customer: dict, chart: dict) -> dict:
@@ -531,6 +579,7 @@ def generate_horoscope(customer: dict) -> None:
         return
     report = ai.horoscope_report(customer, chart, now_context(customer, chart))
     reply(phone, report)
+    send_questions_menu(phone)
 
 
 def answer(customer: dict, msg: dict) -> None:
@@ -549,6 +598,10 @@ def answer(customer: dict, msg: dict) -> None:
     # The current message is the last history row; it is passed separately (with any media).
     if history and history[-1].get("message_id") == msg["message_id"]:
         history = history[:-1]
+    if history and history[-1].get("role") == "assistant" and history[-1].get("message") == i18n.QUESTION_MENU_TEXT_FALLBACK:
+        choice = i18n.question_menu_choice(msg["text"])
+        if choice:
+            msg = {**msg, "text": choice}
 
     intent = None if (msg["media_id"] or msg.get("type") == "reaction") else intents.detect(msg["text"], datetime.now(_tz(customer)).date())
     if intent:

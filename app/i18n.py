@@ -19,6 +19,26 @@ MENU_TEXT_FALLBACK = (MENU_BODY.split("\n\n")[0] + "\n\n"
                       + "\n".join(f"[{i}] {n}" + (f" / {nat}" if nat != n else "") for i, (n, nat) in enumerate(MENU_LANGS, 1))
                       + "\n\nReply with the number (e.g. 3) or the language name.")
 
+QUESTION_MENU_BODY = "*CHOOSE QUESTIONS OR TYPE YOUR OWN QUESTION*"
+QUESTION_MENU_BUTTON = "CHOOSE QUESTIONS"  # max 20 characters
+QUESTION_MENU_ITEMS = [
+    ("q_daily", "Daily Prediction"),
+    ("q_weekly", "Weekly Prediction"),
+    ("q_monthly", "Monthly Prediction"),
+    ("q_career", "Career Prediction"),
+    ("q_business", "Business Prediction"),
+    ("q_financial", "Financial Prediction"),
+    ("q_health", "Health Prediction"),
+    ("q_relationship", "Relationship Prediction"),
+    ("q_custom", "Type your own question"),
+]
+TYPE_OWN_QUESTION = "Type your own question"
+QUESTION_MENU_TEXT_FALLBACK = (
+    QUESTION_MENU_BODY + "\n\n"
+    + "\n".join(f"[{i}] {title}" for i, (_, title) in enumerate(QUESTION_MENU_ITEMS, 1))
+    + "\n\nReply with a number (e.g. 1) or type your own question."
+)
+
 PDF_BEFORE_LANGUAGE = ("🙏 Thank you! Please choose your language first, then send your birth chart PDF again.\n"
                        "ದಯವಿಟ್ಟು ಮೊದಲು ಭಾಷೆ ಆಯ್ಕೆ ಮಾಡಿ, ನಂತರ PDF ಕಳುಹಿಸಿ · पहले भाषा चुनें, फिर PDF भेजें")
 
@@ -64,6 +84,7 @@ T: dict[str, dict[str, str]] = {
         "kundli_format": "🙏 I can read a Kundali as a *PDF* or a clear photo. Or simply answer:",
         "kundli_none": "🙏 I couldn't find birth details in that file, so let's do it step by step.",
         "place_not_found": "🙏 I couldn't find your birthplace on the map. ",
+        "type_own_question": "✍️ Please type your question and send it to me. I will answer based on your birth chart. 🙏",
     },
     "Hindi": {
         "subtitle": "_आपके निजी ज्योतिषी।_",
@@ -99,6 +120,7 @@ T: dict[str, dict[str, str]] = {
         "kundli_format": "🙏 मैं कुंडली *PDF* या साफ़ फ़ोटो के रूप में पढ़ सकता हूँ। या बस इसका उत्तर दीजिए:",
         "kundli_none": "🙏 उस फ़ाइल में जन्म विवरण नहीं मिला, चलिए एक-एक करके भरते हैं।",
         "place_not_found": "🙏 मुझे आपका जन्म स्थान नक्शे पर नहीं मिला। ",
+        "type_own_question": "✍️ कृपया अपना प्रश्न लिखकर भेजें। मैं आपकी जन्म कुंडली के अनुसार उत्तर दूँगा। 🙏",
     },
     "Kannada": {
         "subtitle": "_ನಿಮ್ಮ ವೈಯಕ್ತಿಕ ಜ್ಯೋತಿಷಿ._",
@@ -134,6 +156,7 @@ T: dict[str, dict[str, str]] = {
         "kundli_format": "🙏 ನಾನು ಜಾತಕವನ್ನು *PDF* ಅಥವಾ ಸ್ಪಷ್ಟ ಫೋಟೋ ರೂಪದಲ್ಲಿ ಓದಬಲ್ಲೆ. ಅಥವಾ ಸುಮ್ಮನೆ ಇದಕ್ಕೆ ಉತ್ತರಿಸಿ:",
         "kundli_none": "🙏 ಆ ಫೈಲ್‌ನಲ್ಲಿ ಜನ್ಮ ವಿವರಗಳು ಸಿಗಲಿಲ್ಲ, ಒಂದೊಂದಾಗಿ ತುಂಬೋಣ.",
         "place_not_found": "🙏 ನಿಮ್ಮ ಜನ್ಮ ಸ್ಥಳ ನಕ್ಷೆಯಲ್ಲಿ ಸಿಗಲಿಲ್ಲ. ",
+        "type_own_question": "✍️ ದಯವಿಟ್ಟು ನಿಮ್ಮ ಪ್ರಶ್ನೆಯನ್ನು ಬರೆದು ಕಳುಹಿಸಿ. ನಿಮ್ಮ ಜಾತಕದ ಆಧಾರದ ಮೇಲೆ ನಾನು ಉತ್ತರಿಸುತ್ತೇನೆ. 🙏",
     },
     "Telugu": {
         "subtitle": "_మీ వ్యక్తిగత జ్యోతిష్యుడు._",
@@ -169,6 +192,7 @@ T: dict[str, dict[str, str]] = {
         "kundli_format": "🙏 నేను జాతకాన్ని *PDF* లేదా స్పష్టమైన ఫోటోగా చదవగలను. లేదా దీనికి సమాధానం ఇవ్వండి:",
         "kundli_none": "🙏 ఆ ఫైల్‌లో జన్మ వివరాలు దొరకలేదు, ఒక్కొక్కటిగా నింపుదాం.",
         "place_not_found": "🙏 మీ పుట్టిన ప్రదేశం మ్యాప్‌లో దొరకలేదు. ",
+        "type_own_question": "✍️ దయచేసి మీ ప్రశ్నను టైప్ చేసి పంపండి. మీ జన్మ జాతకం ఆధారంగా నేను సమాధానం ఇస్తాను. 🙏",
     },
     "Tamil": {
         "subtitle": "_உங்கள் தனிப்பட்ட ஜோதிடர்._",
@@ -204,6 +228,7 @@ T: dict[str, dict[str, str]] = {
         "kundli_format": "🙏 நான் ஜாதகத்தை *PDF* அல்லது தெளிவான புகைப்படமாகப் படிக்க முடியும். அல்லது இதற்கு பதில் அளியுங்கள்:",
         "kundli_none": "🙏 அந்த கோப்பில் பிறப்பு விவரங்கள் கிடைக்கவில்லை, ஒவ்வொன்றாக நிரப்புவோம்.",
         "place_not_found": "🙏 உங்கள் பிறந்த இடம் வரைபடத்தில் கிடைக்கவில்லை. ",
+        "type_own_question": "✍️ தயவுசெய்து உங்கள் கேள்வியை எழுதி அனுப்புங்கள். உங்கள் ஜாதகத்தின் அடிப்படையில் பதில் அளிக்கிறேன். 🙏",
     },
     "Malayalam": {
         "subtitle": "_നിങ്ങളുടെ സ്വകാര്യ ജ്യോതിഷി._",
@@ -239,6 +264,7 @@ T: dict[str, dict[str, str]] = {
         "kundli_format": "🙏 എനിക്ക് ജാതകം *PDF* ആയോ വ്യക്തമായ ഫോട്ടോ ആയോ വായിക്കാം. അല്ലെങ്കിൽ ഇതിന് മറുപടി നൽകൂ:",
         "kundli_none": "🙏 ആ ഫയലിൽ ജനന വിവരങ്ങൾ കണ്ടെത്താനായില്ല, ഓരോന്നായി നൽകാം.",
         "place_not_found": "🙏 നിങ്ങളുടെ ജനന സ്ഥലം മാപ്പിൽ കണ്ടെത്താനായില്ല. ",
+        "type_own_question": "✍️ ദയവായി നിങ്ങളുടെ ചോദ്യം ടൈപ്പ് ചെയ്ത് അയക്കൂ. നിങ്ങളുടെ ജാതകത്തിന്റെ അടിസ്ഥാനത്തിൽ ഞാൻ മറുപടി നൽകാം. 🙏",
     },
     "Marathi": {
         "subtitle": "_तुमचे वैयक्तिक ज्योतिषी._",
@@ -274,6 +300,7 @@ T: dict[str, dict[str, str]] = {
         "kundli_format": "🙏 मी कुंडली *PDF* किंवा स्पष्ट फोटो स्वरूपात वाचू शकतो. किंवा फक्त याचे उत्तर द्या:",
         "kundli_none": "🙏 त्या फाइलमध्ये जन्म माहिती सापडली नाही, एकेक करून भरूया.",
         "place_not_found": "🙏 तुमचे जन्मस्थान नकाशावर सापडले नाही. ",
+        "type_own_question": "✍️ कृपया तुमचा प्रश्न टाइप करून पाठवा. मी तुमच्या जन्मकुंडलीनुसार उत्तर देईन. 🙏",
     },
     "Bengali": {
         "subtitle": "_আপনার ব্যক্তিগত জ্যোতিষী।_",
@@ -309,6 +336,7 @@ T: dict[str, dict[str, str]] = {
         "kundli_format": "🙏 আমি কুণ্ডলী *PDF* বা পরিষ্কার ছবি হিসেবে পড়তে পারি। অথবা শুধু এর উত্তর দিন:",
         "kundli_none": "🙏 ওই ফাইলে জন্ম তথ্য পাইনি, একে একে পূরণ করি।",
         "place_not_found": "🙏 আপনার জন্মস্থান মানচিত্রে খুঁজে পাইনি। ",
+        "type_own_question": "✍️ অনুগ্রহ করে আপনার প্রশ্নটি লিখে পাঠান। আমি আপনার জন্মকুণ্ডলী অনুযায়ী উত্তর দেব। 🙏",
     },
     "Gujarati": {
         "subtitle": "_તમારા વ્યક્તિગત જ્યોતિષી._",
@@ -344,6 +372,7 @@ T: dict[str, dict[str, str]] = {
         "kundli_format": "🙏 હું કુંડળી *PDF* અથવા સ્પષ્ટ ફોટો તરીકે વાંચી શકું છું. અથવા ફક્ત આનો જવાબ આપો:",
         "kundli_none": "🙏 તે ફાઇલમાં જન્મ વિગતો મળી નહીં, એક પછી એક ભરીએ.",
         "place_not_found": "🙏 તમારું જન્મ સ્થળ નકશા પર મળ્યું નહીં. ",
+        "type_own_question": "✍️ કૃપા કરીને તમારો પ્રશ્ન લખીને મોકલો. હું તમારી જન્મકુંડળી મુજબ જવાબ આપીશ. 🙏",
     },
     "Punjabi": {
         "subtitle": "_ਤੁਹਾਡੇ ਨਿੱਜੀ ਜੋਤਸ਼ੀ।_",
@@ -379,6 +408,7 @@ T: dict[str, dict[str, str]] = {
         "kundli_format": "🙏 ਮੈਂ ਕੁੰਡਲੀ *PDF* ਜਾਂ ਸਾਫ਼ ਫੋਟੋ ਵਜੋਂ ਪੜ੍ਹ ਸਕਦਾ ਹਾਂ। ਜਾਂ ਬੱਸ ਇਸ ਦਾ ਜਵਾਬ ਦਿਓ:",
         "kundli_none": "🙏 ਉਸ ਫਾਈਲ ਵਿੱਚ ਜਨਮ ਜਾਣਕਾਰੀ ਨਹੀਂ ਮਿਲੀ, ਇੱਕ-ਇੱਕ ਕਰਕੇ ਭਰੀਏ।",
         "place_not_found": "🙏 ਤੁਹਾਡਾ ਜਨਮ ਸਥਾਨ ਨਕਸ਼ੇ 'ਤੇ ਨਹੀਂ ਮਿਲਿਆ। ",
+        "type_own_question": "✍️ ਕਿਰਪਾ ਕਰਕੇ ਆਪਣਾ ਸਵਾਲ ਲਿਖ ਕੇ ਭੇਜੋ। ਮੈਂ ਤੁਹਾਡੀ ਜਨਮ ਕੁੰਡਲੀ ਅਨੁਸਾਰ ਜਵਾਬ ਦੇਵਾਂਗਾ। 🙏",
     },
 }
 
@@ -419,3 +449,15 @@ def menu_choice(text: str) -> str:
     if s.isdigit() and 1 <= int(s) <= len(MENU_LANGS):
         return MENU_LANGS[int(s) - 1][0]
     return ""
+
+
+def question_menu_choice(text: str) -> str:
+    """'1' -> 'Daily Prediction' (number from the fallback questions menu); '' if not a menu number."""
+    s = (text or "").strip().strip(".)]").lstrip("[(")
+    if s.isdigit() and 1 <= int(s) <= len(QUESTION_MENU_ITEMS):
+        return QUESTION_MENU_ITEMS[int(s) - 1][1]
+    return ""
+
+
+def is_type_own_question(text: str) -> bool:
+    return (text or "").strip().lower() == TYPE_OWN_QUESTION.lower()
