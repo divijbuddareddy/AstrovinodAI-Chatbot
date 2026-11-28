@@ -10,10 +10,15 @@
 A plan is switched on only after PhonePe's Order Status API says COMPLETED for the right amount.
 Paying needs a button press (POST), so WhatsApp's link preview (a GET) can never start a payment by itself.
 """
+import hashlib
+import hmac
 import html
 import logging
+import os
+import re
 import secrets
 import time
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -22,6 +27,7 @@ from . import bot, phonepe, plans
 
 log = logging.getLogger("astrovinod")
 router = APIRouter(prefix="/pay")
+web_router = APIRouter()
 
 _PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>AstroVinod – Payment</title>
@@ -288,3 +294,140 @@ def success(token: str):
 def cancel(token: str):
     plans.mark_cancelled(token)
     return _message("❌", "Payment cancelled", "No money was taken. Reply PLANS on WhatsApp anytime to try again.")
+
+
+# ---------------------------------------------------------------- Website checkout & reviewer login
+def _reviewer_creds() -> tuple[str, str]:
+    return os.getenv("REVIEWER_USER", "").strip(), os.getenv("REVIEWER_PASS", "").strip()
+
+
+def _reviewer_cookie(user: str, pw: str) -> str:
+    return hmac.new(pw.encode(), f"reviewer:{user}".encode(), hashlib.sha256).hexdigest()
+
+
+def _is_reviewer(request: Request) -> bool:
+    user, pw = _reviewer_creds()
+    if not user or not pw:
+        return False
+    cookie = request.cookies.get("astrovinod_reviewer", "")
+    return bool(cookie) and hmac.compare_digest(cookie, _reviewer_cookie(user, pw))
+
+
+def _parse_form(body: bytes) -> dict[str, str]:
+    parsed = parse_qs(body.decode("utf-8", errors="ignore"), keep_blank_values=True)
+    return {k: v[0].strip() for k, v in parsed.items() if v}
+
+
+def _norm_phone(raw: str) -> str:
+    digits = re.sub(r"\D", "", raw or "")
+    if len(digits) == 10:
+        digits = "91" + digits
+    return digits if 10 <= len(digits) <= 15 else ""
+
+
+_FORM_CSS = """<style>
+label{display:block;font-size:13px;font-weight:600;margin:12px 0 5px;color:#3b4a54}
+input,select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d7db;border-radius:8px;font:inherit}
+.err{background:#fdecea;color:#b42318;padding:8px 10px;border-radius:6px;font-size:13px;margin:10px 0}
+.ok{background:#e7f8f0;color:#027a48;padding:8px 10px;border-radius:6px;font-size:13px;margin:10px 0}
+.links{display:flex;justify-content:space-between;font-size:13px;margin-top:14px}
+.links a{color:#008069;text-decoration:none}
+</style>"""
+
+
+def _login_html(plan: str = "", username: str = "", error: str = "", status: int = 200) -> HTMLResponse:
+    p_input = f'<input type="hidden" name="plan" value="{html.escape(plan)}">' if plan in plans.PAID else ""
+    err_box = f'<div class="err">{html.escape(error)}</div>' if error else ""
+    return _page(f"""
+      <h1>AstroVinod AI</h1><div class="muted">Member &amp; Reviewer Portal</div>
+      {err_box}
+      <form method="post" action="/login">
+        {p_input}
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" required autocomplete="username" value="{html.escape(username)}" placeholder="Enter username">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required autocomplete="current-password" placeholder="Enter password">
+        <button class="phonepe" type="submit">Sign In</button>
+      </form>
+      <div class="links"><a href="/">&larr; Back to Home</a><a href="/subscribe">Subscribe with WhatsApp &rarr;</a></div>
+    """, status=status, head=_FORM_CSS)
+
+
+@web_router.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, plan: str = ""):
+    if _is_reviewer(request):
+        suffix = f"?plan={plan}" if plan in plans.PAID else ""
+        return RedirectResponse(f"/subscribe{suffix}", status_code=303)
+    user, pw = _reviewer_creds()
+    if not user or not pw:
+        return _message("🔒", "Login unavailable", "Reviewer login is not configured on the server.", 503)
+    return _login_html(plan=plan)
+
+
+@web_router.post("/login", response_class=HTMLResponse)
+async def login_submit(request: Request):
+    user, pw = _reviewer_creds()
+    if not user or not pw:
+        return _message("🔒", "Login unavailable", "Reviewer login is not configured on the server.", 503)
+    form = _parse_form(await request.body())
+    u_ok = hmac.compare_digest(form.get("username", "").encode(), user.encode())
+    p_ok = hmac.compare_digest(form.get("password", "").encode(), pw.encode())
+    plan = form.get("plan", "")
+    if not (u_ok and p_ok):
+        return _login_html(plan=plan, username=form.get("username", ""), error="Invalid username or password.", status=401)
+    suffix = f"?plan={plan}" if plan in plans.PAID else ""
+    resp = RedirectResponse(f"/subscribe{suffix}", status_code=303)
+    resp.set_cookie("astrovinod_reviewer", _reviewer_cookie(user, pw), httponly=True, samesite="lax", max_age=86400)
+    return resp
+
+
+@web_router.get("/logout")
+def logout():
+    resp = RedirectResponse("/", status_code=303)
+    resp.delete_cookie("astrovinod_reviewer")
+    return resp
+
+
+@web_router.get("/subscribe", response_class=HTMLResponse)
+def subscribe_page(request: Request, plan: str = "standard", error: str = ""):
+    chosen = plan.strip().lower()
+    if chosen not in plans.PAID:
+        chosen = "standard"
+    reviewer = _is_reviewer(request)
+    banner = ('<div class="ok">Signed in as PhonePe Reviewer. Select a plan to inspect PhonePe AutoPay checkout.</div>'
+              if reviewer else "")
+    err_box = f'<div class="err">{html.escape(error)}</div>' if error else ""
+    opts = []
+    for key in plans.PAID:
+        p = plans.PLANS[key]
+        chats = "Unlimited chats" if p["chats"] is None else f"{p['chats']} chats/month"
+        sel = " selected" if key == chosen else ""
+        opts.append(f'<option value="{key}"{sel}>{p["icon"]} {p["name"]} — ₹{p["price"]}/month ({chats})</option>')
+    default_phone = "919999999999" if reviewer else ""
+    phone_hint = "Demo reviewer WhatsApp number prefilled" if reviewer else "Enter 10-digit WhatsApp mobile number"
+    footer_link = '<a href="/logout">Sign Out</a>' if reviewer else '<a href="/login">Reviewer Sign In &rarr;</a>'
+    return _page(f"""
+      <h1>AstroVinod AI</h1><div class="muted">WhatsApp Monthly Subscription</div>
+      {banner}{err_box}
+      <form method="post" action="/subscribe">
+        <label for="plan">Subscription Plan</label>
+        <select id="plan" name="plan">{"".join(opts)}</select>
+        <label for="phone">WhatsApp Number</label>
+        <input id="phone" name="phone" type="tel" required value="{default_phone}" placeholder="{phone_hint}">
+        <button class="phonepe" type="submit">Proceed to Checkout</button>
+      </form>
+      <div class="links"><a href="/">&larr; Back to Home</a>{footer_link}</div>
+    """, head=_FORM_CSS)
+
+
+@web_router.post("/subscribe", response_class=HTMLResponse)
+async def subscribe_submit(request: Request):
+    form = _parse_form(await request.body())
+    plan = form.get("plan", "standard").strip().lower()
+    if plan not in plans.PAID:
+        plan = "standard"
+    phone = _norm_phone(form.get("phone", ""))
+    if not phone:
+        return subscribe_page(request, plan=plan, error="Please enter a valid 10-to-15 digit WhatsApp number.")
+    token = plans.create_payment(phone, plan)
+    return RedirectResponse(f"/pay/{token}", status_code=303)
