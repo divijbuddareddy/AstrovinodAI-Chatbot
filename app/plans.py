@@ -35,7 +35,7 @@ PAID = ("standard", "premium", "vip")
 _LEGACY_PLANS = {"gold": "standard", "platinum": "premium"}
 PLAN_IMAGE = "static/plans2.jpg"
 PLAN_IMAGES = {
-    "standard": "static/standard.jpg",
+    "standard": "static/standard2.jpg",
     "premium":  "static/premium.jpg",
     "vip":      "static/vip.jpg",
 }
