@@ -37,7 +37,7 @@ PLAN_IMAGE = "static/plans2.jpg"
 PLAN_IMAGES = {
     "standard": "static/standard2.jpg",
     "premium":  "static/premium2.jpg",
-    "vip":      "static/vip.jpg",
+    "vip":      "static/vip2.jpg",
 }
 
 
