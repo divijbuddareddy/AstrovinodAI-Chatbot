@@ -211,7 +211,7 @@ INTRO_GAP = 2.5  # seconds between messages, so WhatsApp shows them in order (im
 
 
 # Seconds to wait AFTER each image, so the client can look at it before the next one arrives.
-IMAGE_PAUSE = {"static/welcome2.jpg": 6, "static/instructions2.jpg": 10, "static/language.jpg": 3}
+IMAGE_PAUSE = {"static/welcome3.jpg": 6, "static/instructions2.jpg": 10, "static/language.jpg": 3}
 
 
 def _send_image(phone: str, path: str) -> None:
