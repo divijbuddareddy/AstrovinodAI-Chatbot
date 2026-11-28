@@ -248,7 +248,7 @@ def send_plans_prompt(phone: str, body: str, fallback_text: str) -> None:
     buttons = plans.plan_buttons()
     try:
         wa_id = whatsapp.send_buttons(phone, body, buttons, image_link=img_url)
-        store().log_message(phone, "assistant", f"[image: plans.jpg]\n{body}\n[Standard | Premium | VIP]", wa_id, "interactive")
+        store().log_message(phone, "assistant", f"[image: {plans.PLAN_IMAGE.rsplit('/', 1)[-1]}]\n{body}\n[Standard | Premium | VIP]", wa_id, "interactive")
         return
     except Exception:
         log.exception("Plans image+buttons failed for %s - falling back", phone)
